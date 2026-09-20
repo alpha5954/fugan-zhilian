@@ -1,0 +1,115 @@
+name: 部署到 GitHub Pages
+
+# ============================================================================
+# 推送到 main 即自动构建并发布到 https://alpha5954.github.io/fugan-zhilian/
+#
+# 【为什么需要 VITE_ 开头的 secrets】
+# Vite 在**构建时**把 import.meta.env.VITE_* 替换成字面量，不是运行时读取。
+# 所以这两个值必须在构建步骤就以环境变量形式存在，产物里才能带上它们。
+#
+# 【为什么把密钥放进 Secrets 而不是直接写在工作流里】
+# 这两个值本身是公开的（anon key 会打包进前端 JS，任何人打开浏览器都能
+# 看到），写成明文并不构成泄露。放进 Secrets 主要是避免在公开仓库里
+# 暴露项目地址、招来无谓的扫描流量。
+# ============================================================================
+
+on:
+  push:
+    branches: [main]
+  # 支持在 Actions 页面手动触发，便于不发提交也能重新部署
+  workflow_dispatch:
+
+# GITHUB_TOKEN 的最小权限：发布 Pages 需要 pages:write 和 id-token:write
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只跑一个部署。连续推送时取消排队中的旧任务，
+# 但**不取消正在发布的那一个** —— 中途打断会让 Pages 处于半更新状态
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 准备 Node
+        uses: actions/setup-node@v4
+        with:
+          # 与本地开发环境一致（v24）。自检脚本用 node 直接跑 .ts，
+          # 依赖 Node 22.6+ 的类型剥离能力，版本太低会失败
+          node-version: '24'
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 校验构建所需的 secrets
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          missing=""
+          [ -z "$VITE_SUPABASE_URL" ]      && missing="$missing VITE_SUPABASE_URL"
+          [ -z "$VITE_SUPABASE_ANON_KEY" ] && missing="$missing VITE_SUPABASE_ANON_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少仓库 secret:$missing"
+            echo "Settings → Secrets and variables → Actions → New repository secret"
+            exit 1
+          fi
+          echo "secrets 已配置"
+
+      # 逻辑自检先跑。这些断言覆盖信号物理关系、评估指标、聚合逻辑、
+      # 预警迟滞 —— 挂了就不该把产物发出去
+      - name: 运行逻辑自检
+        run: npm run check
+
+      - name: 构建
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: npm run build
+
+      # 上面两步都成功，仍可能因为环境变量没被 Vite 读到而产出白屏站点。
+      # src/lib/supabase.ts 在缺配置时是**运行时**抛错，构建阶段不会报。
+      # 所以这里直接翻产物，确认地址真的被打进去了。
+      - name: 确认配置已打进产物
+        run: |
+          if ! grep -rq "supabase.co" dist/assets/*.js; then
+            echo "::error::构建产物里找不到 Supabase 地址 —— 环境变量没有生效，线上会白屏"
+            exit 1
+          fi
+          echo "配置已打进产物"
+
+      # GitHub Pages 不支持 SPA 回退：直接访问 /fugan-zhilian/analysis
+      # 或在深链接上刷新，会因为找不到同名文件而 404。
+      # 把 index.html 复制成 404.html 后，Pages 会用这个页面兜底 ——
+      # 应用照常启动，vue-router 按 location.pathname 解析出正确的路由。
+      - name: 生成 404.html（SPA 深链接回退）
+        run: cp dist/index.html dist/404.html
+
+      - name: 配置 Pages
+        uses: actions/configure-pages@v5
+
+      - name: 上传产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 发布
+        id: deployment
+        uses: actions/deploy-pages@v4

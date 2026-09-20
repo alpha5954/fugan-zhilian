@@ -52,7 +52,34 @@ npm run build     # 类型检查 + 生产构建，输出到 dist/
 npm run preview   # 本地预览构建产物
 ```
 
-部署目标是 GitHub Pages，站点位于 `https://<用户名>.github.io/fugan-zhilian/` 的子路径下。因此 `vite.config.ts` 中的 `base` 必须与此路径一致，**更换仓库名时需同步修改**，否则线上静态资源会全部 404。
+### 线上地址
+
+<https://alpha5954.github.io/fugan-zhilian/>
+
+推送到 `main` 即自动部署（`.github/workflows/deploy.yml`）。站点位于仓库名子路径下，因此 `vite.config.ts` 的 `base` 必须与此一致，**更换仓库名时需同步修改**，否则线上静态资源会全部 404。
+
+### 首次部署需要两步手动配置
+
+**1. 添加仓库 Secrets**（Settings → Secrets and variables → Actions）
+
+| Secret | 值 |
+|---|---|
+| `VITE_SUPABASE_URL` | `https://<项目ref>.supabase.co` |
+| `VITE_SUPABASE_ANON_KEY` | publishable key 或 anon key |
+
+> Vite 在**构建时**把 `import.meta.env.VITE_*` 替换成字面量，不是运行时读取。所以这两个值必须在构建步骤就以环境变量形式存在，产物里才带得上。缺了它们构建**不会报错**，但线上会白屏——工作流里加了一步翻产物确认地址真的打进去了。
+
+**2. 启用 GitHub Pages**（Settings → Pages → Source 选 **GitHub Actions**）
+
+不要选 "Deploy from a branch"，那个模式不会执行 `deploy.yml`。
+
+### 关于 404.html
+
+GitHub Pages 是静态托管，**不支持 SPA 回退**：直接访问 `/fugan-zhilian/analysis` 或在深链接上刷新，会因为找不到同名文件而返回 404。
+
+构建流程里加了一步把 `index.html` 复制成 `404.html`。Pages 遇到未知路径时会用这个页面兜底，应用照常启动，vue-router 按 `location.pathname` 解析出正确路由。
+
+> 副作用：深链接返回的 HTTP 状态码是 404 而非 200。对演示无影响，但如果将来要做 SEO，需要改用 hash 路由或换支持 SPA 回退的托管（Vercel / Netlify）。
 
 ## 逻辑自检
 
@@ -182,7 +209,7 @@ supabase/
 
 ## 运维：Supabase 保活
 
-Supabase 免费版项目连续 **7 天无活动会被自动暂停**，恢复需人工操作。`.github/workflows/keepalive.yml` 每天调用一次数据库里的 `ping_keepalive()` 维持活跃。
+Supabase 免费版项目连续 **7 天无活动会被自动暂停**，恢复需人工操作。`.github/workflows/keep-alive.yml` 每天调用一次数据库里的 `ping_keepalive()` 维持活跃。
 
 首次使用需在仓库中添加两个 secret（Settings → Secrets and variables → Actions）：
 
