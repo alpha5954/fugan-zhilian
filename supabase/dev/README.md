@@ -53,6 +53,30 @@ docker exec fugan-pgtest psql -U postgres -d postgres \
 |---|---|
 | `00_supabase_stub.sql` | 补出 Supabase 托管环境才有的东西：`auth` schema、`auth.users` 表、`auth.uid()` / `auth.role()` 函数、`anon` / `authenticated` 角色。原生 postgres 镜像里没有这些，迁移会报"关系不存在" |
 | `rls_behaviour_test.sql` | 造 4 个测试用户（含一个试图注册成 admin 的），用 `SET ROLE` + 伪造 JWT 身份实际跑一遍读写，断言每一条策略的行为 |
+| `e2e_auth.py` | 对**真实 Supabase 项目**跑认证链路：注册 → 触发器建档 → 角色白名单 → 登录 → RLS 隔离。18 项断言 |
+
+## 两套测试的分工
+
+| | `rls_behaviour_test.sql` | `e2e_auth.py` |
+|---|---|---|
+| 跑在哪 | 本地 Docker Postgres | 真实 Supabase 项目 |
+| 覆盖 | RLS 策略、触发器、列级授权 | 加上 GoTrue 注册/登录、PostgREST、JWT 签发 |
+| 速度 | 几十秒，随便重跑 | 联网，会创建测试账号 |
+| 何时用 | 每次改迁移后 | 改认证流程后，或上线前 |
+
+本地那套更快更干净，日常改表结构用它；涉及注册/登录实际行为的，只有真实项目能验。
+
+### 跑 e2e_auth.py 的前置条件
+
+项目的 **`Confirm email` 必须关闭**，否则注册不返回 session，第一步就失败：
+
+```
+Authentication → Sign In / Providers → Email → 关掉 Confirm email
+```
+
+改完 `GET /auth/v1/settings` 里的 `mailer_autoconfirm` 会变成 `true`。
+
+⚠️ 每次运行会创建两个测试账号（邮箱带时间戳后缀）。跑完去 **Authentication → Users** 搜 `e2e-` 批量删除。
 
 ## 与线上环境的差异
 
