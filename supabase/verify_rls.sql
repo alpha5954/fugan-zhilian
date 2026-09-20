@@ -4,18 +4,34 @@
 -- 在 Supabase SQL Editor 里整段粘贴执行，逐段对照注释里的"期望"看结果。
 -- 只读查询为主，第 7 段会真的写数据（就是心跳本身，无副作用）。
 -- ============================================================================
+--
+-- ⚠️ 写应用代码时必须知道的一点：RLS 的拒绝方式分两种
+--
+--   【抛异常】INSERT 违反 WITH CHECK、以及列级授权不足
+--            → 客户端收到 error，supabase-js 会走 error 分支
+--   【静默过滤】SELECT 查不到别人的行 → 返回空数组，没有 error
+--              UPDATE 改不到别人的行 → 影响 0 行，没有 error
+--
+--   后者不会报错！如果代码写成
+--       await supabase.from('profiles').update({...}).eq('id', id)
+--   然后假定"没报错就是改成功了"，在无权修改时会安静地什么都不做。
+--   凡是 UPDATE / DELETE，都要检查 affected rows 或改用 .select() 回读确认。
+-- ============================================================================
 
 
 -- ---------------------------------------------------------------------------
 -- 1. 表是否建全、RLS 是否开启
 -- ---------------------------------------------------------------------------
--- 期望：5 行，rls_on 全为 true
-select tablename,
-       rowsecurity      as rls_on,
-       forcerowsecurity as force_rls
-from pg_tables
-where schemaname = 'public'
-order by tablename;
+-- 期望：6 行，rls_on 全为 true
+-- 注：这两个字段在 pg_class 上，pg_tables 视图里没有
+select c.relname  as tablename,
+       c.relrowsecurity      as rls_on,
+       c.relforcerowsecurity as force_rls
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and c.relkind = 'r'
+order by c.relname;
 
 
 -- ---------------------------------------------------------------------------
@@ -47,16 +63,23 @@ order by table_name, grantee;
 -- ---------------------------------------------------------------------------
 -- 4. 列级授权 —— 防提权的关键
 -- ---------------------------------------------------------------------------
--- 期望只有 5 行：
---   profiles → display_name / phone / birth_date
+-- 只看做过列级收窄的这两张表。期望 5 行：
 --   alerts   → acknowledged_at / acknowledged_by
+--   profiles → birth_date / display_name / phone
+--
 -- 如果 profiles 这里出现了 role，说明列级授权没生效，
 -- 患者就能把自己的 role 改成 admin。
+--
+-- 注：上面第 3 段里 profiles 和 alerts 没有表级 UPDATE，那是正确现象——
+-- revoke + grant(列) 会把表级权限整个拿掉，只剩列级。
+-- 其余三张表（care_links / devices / rehab_sessions）是表级 UPDATE，
+-- 在 information_schema 里会展开成所有列，所以这里把它们排除掉，避免噪音。
 select table_name, column_name
 from information_schema.column_privileges
 where table_schema = 'public'
   and grantee = 'authenticated'
   and privilege_type = 'UPDATE'
+  and table_name in ('profiles', 'alerts')
 order by table_name, column_name;
 
 
