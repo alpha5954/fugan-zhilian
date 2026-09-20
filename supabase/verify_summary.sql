@@ -7,7 +7,8 @@
 --
 -- 想看明细（策略清单、函数清单等）再用 verify_rls.sql 逐段选中执行。
 --
--- 期望输出：14 行，序号 1-14，结果列全部 PASS。
+-- 期望输出：15 行。序号 1-14 的结果列应全部 PASS；
+-- 第 15 行是 INFO，只列出 public 下所有 security definer 函数供辨认，不参与判断。
 -- ============================================================================
 
 with
@@ -48,9 +49,23 @@ alert_cols as (
   where table_schema = 'public' and grantee = 'authenticated'
     and privilege_type = 'UPDATE' and table_name = 'alerts'
 ),
--- security definer 函数个数
-funcs as (
+-- 本项目自己建的 7 个 security definer 函数是否齐全。
+-- 刻意不数"总数"——Supabase 自己也会在 public 下装辅助函数
+-- （比如启用自动 RLS 时的 rls_auto_enable），数总数会误报。
+sd_mine as (
   select count(*) as n
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.prosecdef
+    and p.proname in (
+      'my_role', 'is_caregiver_of', 'is_patient_of', 'can_access_patient',
+      'enforce_care_link_transition', 'handle_new_user', 'ping_keepalive')
+),
+-- 信息行：public 下所有 security definer 函数，用于辨认多出来的那些
+sd_all as (
+  select count(*) as n,
+         coalesce(string_agg(p.proname, ', ' order by p.proname), '(无)') as names
   from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and p.prosecdef
@@ -141,10 +156,10 @@ select 10, 'alerts 的 severity 列不可更新',
        case when alert_cols.cols like '%severity%' then '❌ severity 可被改！' else '已排除' end
 from alert_cols
 union all
-select 11, 'security definer 函数 = 7 个',
-       case when funcs.n = 7 then 'PASS' else 'FAIL' end,
-       funcs.n || ' 个'
-from funcs
+select 11, '本项目 7 个 security definer 函数齐全',
+       case when sd_mine.n = 7 then 'PASS' else 'FAIL' end,
+       sd_mine.n || '/7 个'
+from sd_mine
 union all
 select 12, '关键触发器 = 5 个',
        case when trgs.n = 5 then 'PASS' else 'FAIL' end,
@@ -159,7 +174,14 @@ union all
 select 14, 'ping_keepalive 对 anon 可执行',
        case when ka_exec.n = 1 then 'PASS' else 'FAIL' end,
        ka_exec.n || ' 项授权'
-from ka_exec;
+from ka_exec
+union all
+-- 信息行，不参与判断：列出 public 下全部 security definer 函数，
+-- 便于辨认哪些是 Supabase 自己装的、哪些是本项目建的
+select 15, '【信息】public 下全部 security definer 函数',
+       'INFO',
+       sd_all.n || ' 个：' || sd_all.names
+from sd_all;
 
 -- ============================================================================
 -- 第 7 段那个心跳写入这里没重复做，避免每次核对都把 ping_count 加一。
