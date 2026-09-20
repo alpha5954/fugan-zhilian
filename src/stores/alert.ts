@@ -100,12 +100,16 @@ export const useAlertStore = defineStore('alert', () => {
    * 比拉回全部行再在本地统计便宜得多。RLS 依然生效，统计范围仍是
    * 当前用户可见的那些预警。
    */
-  async function fetchUnacknowledgedCount(): Promise<void> {
-    const { count, error: err } = await supabase
+  async function fetchUnacknowledgedCount(patientId?: string): Promise<void> {
+    let query = supabase
       .from('alerts')
       .select('*', { count: 'exact', head: true })
       .is('acknowledged_at', null)
 
+    // 家属的 RLS 范围是多个监护对象，不指定就统计成所有人的合计
+    if (patientId) query = query.eq('patient_id', patientId)
+
+    const { count, error: err } = await query
     if (err) {
       error.value = toMessage(err, '统计未处理预警失败')
       return

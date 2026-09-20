@@ -101,6 +101,12 @@ export type Profile = {
   phone: string | null
   /** 日期，格式 YYYY-MM-DD */
   birth_date: string | null
+  /**
+   * 监护邀请码，6 位大写字母数字（去掉了 I/L/O/0/1 这些形近字符）。
+   * 患者把它发给家属，家属凭码发起监护申请。迁移 7 新增。
+   * 不可修改 —— 能改就等于能冒用别人的码接收申请。
+   */
+  invite_code: string | null
   created_at: Timestamp
   updated_at: Timestamp
 }
@@ -178,6 +184,24 @@ export interface ClaimDeviceResult {
     | 'not_authenticated'
   message: string
   /** 成功时返回设备 id */
+  id?: string
+}
+
+/** request_care_link() 的返回结构 */
+export interface CareLinkRequestResult {
+  ok: boolean
+  reason:
+    | 'created'
+    | 'already_pending'
+    | 'already_active'
+    | 'reopened'
+    | 'not_found'
+    | 'invalid_code'
+    | 'invalid_relation'
+    | 'self'
+    | 'not_authenticated'
+  message: string
+  /** 成功时返回关系 id */
   id?: string
 }
 
@@ -278,10 +302,17 @@ export type Keepalive = {
 // 视图模型 —— 前端展示用，不对应数据库表
 // ---------------------------------------------------------------------------
 
-/** 监护关系 + 对方资料，用于"我的监护对象"列表 */
-export interface CareLinkWithProfile extends CareLink {
-  /** 关系另一端那个人的资料 */
-  counterpart: Profile
+/**
+ * 监护关系 + 对方姓名。
+ *
+ * 只带姓名而不是完整 Profile —— 待确认阶段双方读不到对方资料（RLS 只放行
+ * 已生效关系），姓名由 get_care_counterparts() 单独提供。
+ */
+export interface CareLinkWithName extends CareLink {
+  /** 关系另一端那个人的 user id */
+  counterpart_id: string
+  /** 关系另一端那个人的显示名，可能为 null */
+  counterpart_name: string | null
 }
 
 /** 首页概览数据 */
@@ -342,6 +373,22 @@ export interface Database {
       claim_device: {
         Args: { p_serial: string }
         Returns: ClaimDeviceResult
+      }
+      /**
+       * 凭邀请码发起监护申请。
+       * 只能创建 pending 状态 —— 是否生效由患者本人在界面上确认。
+       */
+      request_care_link: {
+        Args: { p_code: string; p_relation?: CareRelation }
+        Returns: CareLinkRequestResult
+      }
+      /**
+       * 取监护关系中对方的姓名（含待确认的）。
+       * 只返回姓名，不返回其他资料 —— 见迁移 8 的说明。
+       */
+      get_care_counterparts: {
+        Args: Record<string, never>
+        Returns: { link_id: string; counterpart_id: string; display_name: string | null }[]
       }
     }
     Enums: {

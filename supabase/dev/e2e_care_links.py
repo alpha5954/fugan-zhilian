@@ -150,19 +150,52 @@ try:
     # -----------------------------------------------------------------------
     print()
     print("=" * 70)
-    print("3. 家属发起申请（pending）")
+    print("3. 家属凭邀请码发起申请（生产路径）")
     print("=" * 70)
-    st, link = call("POST", "/rest/v1/care_links",
-                    {"patient_id": uid_p, "caregiver_id": uid_c,
-                     "relation": "family", "status": "pending"},
-                    token=tok_c)
-    check("家属可以发起监护申请", st in (200, 201) and bool(link), f"HTTP {st}")
+
+    # 患者读自己的资料拿到邀请码
+    st, prof = call("GET", "/rest/v1/profiles?select=invite_code", token=tok_p)
+    code = prof[0]["invite_code"] if prof else None
+    check("患者资料里有邀请码", bool(code), f"code = {code}")
+
+    if code:
+        st, r = call("POST", "/rest/v1/rpc/request_care_link",
+                     {"p_code": code, "p_relation": "family"}, token=tok_c)
+        check("凭码发起申请成功",
+              st == 200 and isinstance(r, dict) and r.get("ok"),
+              f"{r.get('reason') if isinstance(r, dict) else r}")
+        if isinstance(r, dict) and r.get("id"):
+            created["care_links"].append(r["id"])
+
+        st, r = call("POST", "/rest/v1/rpc/request_care_link",
+                     {"p_code": code, "p_relation": "family"}, token=tok_c)
+        check("重复申请返回 already_pending",
+              isinstance(r, dict) and r.get("reason") == "already_pending",
+              r.get("reason") if isinstance(r, dict) else str(r))
+
+        st, r = call("POST", "/rest/v1/rpc/request_care_link",
+                     {"p_code": "ZZZZZZ", "p_relation": "family"}, token=tok_c)
+        check("无效邀请码返回 not_found",
+              isinstance(r, dict) and r.get("reason") == "not_found")
+
+        st, r = call("POST", "/rest/v1/rpc/request_care_link",
+                     {"p_code": code}, token=tok_p)
+        check("不能添加自己",
+              isinstance(r, dict) and r.get("reason") == "self")
+
+        # 匿名不可调用
+        st, _ = call("POST", "/rest/v1/rpc/request_care_link",
+                     {"p_code": code, "p_relation": "family"})
+        check("匿名调用被拒", st >= 400, f"HTTP {st}")
+
+    # 取关系 id 供后续步骤使用
+    st, links = call("GET", "/rest/v1/care_links?select=*", token=tok_c)
+    link = links if links else None
     if not link:
-        print(f"  错误详情：{link}")
+        print("  关系创建失败，后续测试无法继续")
         cleanup()
         sys.exit(1)
     link_id = link[0]["id"]
-    created["care_links"].append(link_id)
 
     st, r = call("GET", "/rest/v1/rehab_sessions?select=*", token=tok_c)
     check("pending 状态下仍然看不到数据", st == 200 and len(r or []) == 0,

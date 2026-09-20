@@ -5,7 +5,7 @@
 // 四个图表：活动度趋势（按动作分线）、各动作达标对比、温度历史、动作分布。
 // 导出 PDF 走浏览器打印，见文件末尾 exportPdf 的说明。
 // ============================================================================
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import BarChart from '@/components/BarChart.vue'
 import type { BarSeries } from '@/components/BarChart.vue'
@@ -23,9 +23,11 @@ import {
 } from '@/lib/analysis'
 import { REHAB_EXERCISES } from '@/lib/assessment'
 import { formatDateTime } from '@/lib/format'
+import { useCareStore } from '@/stores/care'
 import { useSessionStore } from '@/stores/session'
 
 const sessions = useSessionStore()
+const care = useCareStore()
 
 // ---------------------------------------------------------------------------
 // 筛选
@@ -68,12 +70,18 @@ async function load() {
     const range = rangeFromDays(rangeDays.value)
     await sessions.fetch({
       ...range,
+      // 家属的 RLS 范围是多个监护对象，不指定会把几个人的记录
+      // 画进同一条趋势线里 —— 那比没有数据更糟，因为看起来是"有结果"的
+      patientId: care.activePatientId,
       limit: 500,
     })
   } finally {
     loading.value = false
   }
 }
+
+// 切换查看对象后重新拉取
+watch(() => care.activePatientId, load)
 
 function onFilterChange() {
   void load()

@@ -2,10 +2,11 @@
 // ============================================================================
 // 默认布局 —— 顶部导航栏 + 主内容区
 // ============================================================================
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
 import { useAlertStore } from '@/stores/alert'
+import { useCareStore } from '@/stores/care'
 import { useUserStore } from '@/stores/user'
 import type { UserRole } from '@/types'
 
@@ -13,6 +14,15 @@ const route = useRoute()
 const router = useRouter()
 const user = useUserStore()
 const alerts = useAlertStore()
+const care = useCareStore()
+
+const careBadge = computed(() => care.pendingCount)
+
+// 在布局层拉一次监护关系 —— 角标和"正在查看谁"的提示条都要用，
+// 放到各页面里拉会导致切页面时角标闪烁
+onMounted(() => {
+  if (user.isLoggedIn && !care.loaded) void care.fetchAll()
+})
 
 /** 导航项。顺序即展示顺序 */
 const navItems = [
@@ -21,6 +31,7 @@ const navItems = [
   { path: '/assessment', label: '康复评估' },
   { path: '/analysis', label: '数据分析' },
   { path: '/devices', label: '我的设备' },
+  { path: '/care', label: '监护管理' },
   { path: '/about', label: '关于' },
 ] as const
 
@@ -78,6 +89,12 @@ async function handleCommand(command: string) {
           >
             {{ alertBadge > 99 ? '99+' : alertBadge }}
           </span>
+          <span
+            v-if="item.path === '/care' && careBadge > 0"
+            class="layout__badge"
+          >
+            {{ careBadge }}
+          </span>
         </RouterLink>
       </nav>
 
@@ -99,6 +116,18 @@ async function handleCommand(command: string) {
     </header>
 
     <main class="layout__main">
+      <!-- 家属正在查看他人数据时的常驻提示。
+           没有这条的话，用户很容易把监护对象的指标当成自己的看，
+           尤其在两张表长得一模一样的情况下。 -->
+      <div v-if="care.isViewingOther" class="viewing">
+        <span class="viewing__text">
+          正在查看 <strong>{{ care.activePatientName }}</strong> 的数据
+        </span>
+        <el-button size="small" @click="care.setViewing(null)">
+          返回我自己
+        </el-button>
+      </div>
+
       <RouterView />
     </main>
   </div>
@@ -220,6 +249,29 @@ async function handleCommand(command: string) {
   width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
+}
+
+/* ---------- 正在查看他人的提示条 ---------- */
+.viewing {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid #f5dab1;
+  background: #fdf8f0;
+}
+
+.viewing__text {
+  font-size: 13px;
+  color: #a06800;
+}
+
+.viewing__text strong {
+  color: #7a4f00;
 }
 
 /* ==========================================================================

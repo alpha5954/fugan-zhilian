@@ -5,7 +5,7 @@
 // 三块内容：当前状态的核心指标、传感器性能参数、常用功能入口。
 // 指标走真实数据（RLS 决定范围），性能参数是计划书里的静态指标。
 // ============================================================================
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 
@@ -13,6 +13,7 @@ import StateBlock from '@/components/StateBlock.vue'
 import { PERFORMANCE_METRICS, PROJECT } from '@/constants/project'
 import { formatRelative } from '@/lib/format'
 import { useAlertStore } from '@/stores/alert'
+import { useCareStore } from '@/stores/care'
 import { useDeviceStore } from '@/stores/device'
 import { useSessionStore } from '@/stores/session'
 import { useUserStore } from '@/stores/user'
@@ -21,6 +22,7 @@ const user = useUserStore()
 const sessions = useSessionStore()
 const alerts = useAlertStore()
 const devices = useDeviceStore()
+const care = useCareStore()
 
 const loading = ref(true)
 
@@ -117,17 +119,24 @@ const entries = [
 async function reload() {
   loading.value = true
   try {
-    // 四个请求互不依赖，并发发出
+    // 四个请求互不依赖，并发发出。
+    // 全部带上 patientId —— 家属的 RLS 范围是多个监护对象，
+    // 不指定的话四张卡片会显示成几个人的合计
+    const pid = care.activePatientId
     await Promise.all([
-      sessions.fetch({ limit: 20 }),
-      sessions.fetchTodayCount(),
-      alerts.fetchUnacknowledgedCount(),
-      devices.fetchAll(),
+      sessions.fetch({ limit: 20, patientId: pid }),
+      sessions.fetchTodayCount(pid),
+      alerts.fetchUnacknowledgedCount(pid),
+      devices.fetchAll({ ownerId: pid }),
     ])
   } finally {
     loading.value = false
   }
 }
+
+// 切换查看对象后要重新拉数据。用 watch 而不是在 Care 页面里跳转后再拉 ——
+// 用户也可能在顶部提示条上点「返回我自己」，同样需要刷新
+watch(() => care.activePatientId, reload)
 
 /**
  * 任一 store 出错就展示出来。

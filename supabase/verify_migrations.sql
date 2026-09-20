@@ -38,4 +38,25 @@ select * from (
                     where table_schema = 'public' and grantee = 'authenticated'
                       and privilege_type = 'UPDATE' and table_name = 'care_links') = 'status'
               then 'PASS' else 'FAIL' end
+  union all select 8, '迁移7: profiles.invite_code 存在且有唯一约束',
+         case when exists (select 1 from information_schema.columns
+                           where table_schema = 'public' and table_name = 'profiles'
+                             and column_name = 'invite_code')
+               and exists (select 1 from pg_constraint
+                           where conname = 'profiles_invite_code_key'
+                             and conrelid = 'public.profiles'::regclass)
+              then 'PASS' else 'FAIL' end
+  union all select 9, '迁移7: 所有用户都有邀请码',
+         case when (select count(*) from public.profiles where invite_code is null) = 0
+              then 'PASS' else 'FAIL' end
+  union all select 10, '迁移7: request_care_link 已授权给 authenticated',
+         case when (select count(*) from information_schema.routine_privileges
+                    where routine_schema = 'public' and routine_name = 'request_care_link'
+                      and grantee = 'authenticated' and privilege_type = 'EXECUTE') = 1
+              then 'PASS' else 'FAIL' end
+  union all select 11, '迁移8: get_care_counterparts 已授权给 authenticated',
+         case when (select count(*) from information_schema.routine_privileges
+                    where routine_schema = 'public' and routine_name = 'get_care_counterparts'
+                      and grantee = 'authenticated' and privilege_type = 'EXECUTE') = 1
+              then 'PASS' else 'FAIL' end
 ) t order by 项;

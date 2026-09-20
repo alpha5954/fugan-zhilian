@@ -7,7 +7,7 @@
 // 指标算法（RMS、ROM、疲劳趋势）与实际接入硬件后一致，区别只在于数据源 ——
 // 现在由模拟器生成，将来换成真实采集。
 // ============================================================================
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 import { ElMessage } from 'element-plus'
 
@@ -20,12 +20,14 @@ import {
   type SessionResult,
 } from '@/lib/assessment'
 import { formatDuration } from '@/lib/format'
+import { useCareStore } from '@/stores/care'
 import { useDeviceStore } from '@/stores/device'
 import { useSessionStore } from '@/stores/session'
 import { useUserStore } from '@/stores/user'
 import type { JointName, RehabSessionInsert } from '@/types'
 
 const user = useUserStore()
+const care = useCareStore()
 const sessions = useSessionStore()
 const devices = useDeviceStore()
 
@@ -194,12 +196,20 @@ async function save() {
 
 // ---------------------------------------------------------------------------
 
+/** 拉取 ROM 对比用的历史记录。切换查看对象时要重新拉 */
+async function loadHistory() {
+  await sessions.fetch({ limit: 5, patientId: care.activePatientId })
+}
+
 onMounted(() => {
   regenerate()
-  // 拉最近几条记录，用于 ROM 对比（RLS 只会返回当前用户可见的）
-  if (!sessions.loaded) void sessions.fetch({ limit: 5 })
-  if (!devices.loaded) void devices.fetchAll()
+  void loadHistory()
+  // 设备只列自己的 —— 记录训练用的是患者本人的设备
+  if (!devices.loaded) void devices.fetchAll({ ownerId: user.userId ?? undefined })
 })
+
+// 切换查看对象后重新拉历史，否则 ROM 对比会拿别人的上次记录来比
+watch(() => care.activePatientId, loadHistory)
 </script>
 
 <template>

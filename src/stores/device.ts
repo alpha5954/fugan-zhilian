@@ -30,22 +30,28 @@ export const useDeviceStore = defineStore('device', () => {
   )
 
   /**
-   * 拉取当前用户可见的全部设备。
+   * 拉取设备列表。
    *
-   * 不需要自己加 owner_id 过滤 —— RLS 已经把结果集限定为「自己的 +
-   * 自己监护的患者的」。多写一层过滤不仅冗余，还会在监护关系变化时
-   * 因为条件写死而漏数据。
+   * RLS 已经把结果集限定为「自己的 + 自己监护的患者的」。但对家属来说，
+   * 那是**多个人的设备混在一起** —— 所以查看特定对象时必须显式加
+   * ownerId 过滤，否则会把几个监护对象的设备画进同一张表。
+   *
+   * 不传 ownerId 时返回全部可见设备（患者本人看到的就只是自己的）。
    */
-  async function fetchAll(): Promise<void> {
+  async function fetchAll(options: { ownerId?: string } = {}): Promise<void> {
     loading.value = true
     error.value = null
     try {
-      const { data, error: err } = await supabase
+      let query = supabase
         .from('devices')
         .select('*')
         .order('created_at', { ascending: false })
 
+      if (options.ownerId) query = query.eq('owner_id', options.ownerId)
+
+      const { data, error: err } = await query
       if (err) throw err
+
       devices.value = data ?? []
       loaded.value = true
     } catch (e) {

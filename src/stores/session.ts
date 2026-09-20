@@ -101,12 +101,16 @@ export const useSessionStore = defineStore('session', () => {
    * 传给 PostgREST。若直接用 UTC 零点，东八区用户在早上 8 点前看到的
    * 「今日」会从前一天算起。
    */
-  async function fetchTodayCount(): Promise<void> {
-    const { count, error: err } = await supabase
+  async function fetchTodayCount(patientId?: string): Promise<void> {
+    let query = supabase
       .from('rehab_sessions')
       .select('*', { count: 'exact', head: true })
       .gte('started_at', startOfToday().toISOString())
 
+    // 家属的 RLS 范围是多个监护对象，不指定就统计成所有人的合计
+    if (patientId) query = query.eq('patient_id', patientId)
+
+    const { count, error: err } = await query
     if (err) {
       error.value = toMessage(err, '统计今日训练次数失败')
       return

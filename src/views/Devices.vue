@@ -20,6 +20,18 @@ import type { Device, DeviceStatus } from '@/types'
 const devices = useDeviceStore()
 const user = useUserStore()
 
+/**
+ * 设备页始终看**自己**的设备。
+ *
+ * 即使家属切到了某个监护对象，绑定/解绑也必须作用在自己的设备上 ——
+ * 让家属在这里操作别人的设备，既有权限问题（RLS 的 devices_update
+ * 只放行 owner_id = auth.uid()），语义上也不对：设备是患者自己戴的。
+ * 查看监护对象的设备状态在数据分析页体现。
+ */
+function loadDevices() {
+  void devices.fetchAll({ ownerId: user.userId ?? undefined })
+}
+
 const STATUS_LABEL: Record<DeviceStatus, string> = {
   online: '在线',
   offline: '离线',
@@ -189,9 +201,7 @@ async function unbind(row: Device) {
 
 // ---------------------------------------------------------------------------
 
-onMounted(() => {
-  if (!devices.loaded) void devices.fetchAll()
-})
+onMounted(loadDevices)
 </script>
 
 <template>
@@ -219,7 +229,7 @@ onMounted(() => {
       <header class="panel__head">
         <h2 class="panel__title">设备列表</h2>
         <div class="panel__actions">
-          <el-button :loading="devices.loading" @click="devices.fetchAll()">
+          <el-button :loading="devices.loading" @click="loadDevices">
             刷新
           </el-button>
           <el-button type="primary" @click="openDialog">添加设备</el-button>
@@ -227,7 +237,7 @@ onMounted(() => {
       </header>
 
       <!-- 拉取失败时给出重试出口；表格自带的 empty-text 只覆盖"确实没有数据" -->
-      <StateBlock :error="devices.error" @retry="devices.fetchAll()" />
+      <StateBlock :error="devices.error" @retry="loadDevices" />
 
       <el-table
         v-loading="devices.loading"
