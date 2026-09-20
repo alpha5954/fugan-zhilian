@@ -429,6 +429,14 @@ onMounted(load)
   gap: 16px;
 }
 
+/* 窄屏收成单列。不加这条的话，四个图表会被挤进两列，
+   每个约 180px 宽 —— 折线图和饼图在这个宽度下基本读不出信息 */
+@media (max-width: 820px) {
+  .charts {
+    grid-template-columns: 1fr;
+  }
+}
+
 .panel {
   display: flex;
   flex-direction: column;

@@ -32,4 +32,10 @@ select * from (
                     where routine_schema = 'public' and routine_name = 'claim_device'
                       and grantee = 'anon' and privilege_type = 'EXECUTE') = 0
               then 'PASS' else 'FAIL' end
+  union all select 7, '迁移6: care_links 仅 status 列可更新',
+         case when (select string_agg(column_name, ',' order by column_name)
+                    from information_schema.column_privileges
+                    where table_schema = 'public' and grantee = 'authenticated'
+                      and privilege_type = 'UPDATE' and table_name = 'care_links') = 'status'
+              then 'PASS' else 'FAIL' end
 ) t order by 项;

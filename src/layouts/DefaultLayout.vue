@@ -221,4 +221,54 @@ async function handleCommand(command: string) {
   margin: 0 auto;
   box-sizing: border-box;
 }
+
+/* ==========================================================================
+   窄屏适配
+   ==========================================================================
+   顶部栏原本是「品牌 + 导航 + 用户区」挤在一行，375px 的手机上会互相
+   挤压。改成两行：第一行只留 logo 方块和用户区，导航换到第二行横向滚动。
+   品牌全称在小屏上省掉 —— 保住识别度的是那个色块，不是那串字。
+   ========================================================================== */
+@media (max-width: 768px) {
+  .layout__header {
+    height: auto;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 10px 14px;
+  }
+
+  /* 只留 logo 色块，隐去全称 */
+  .layout__brand-text {
+    display: none;
+  }
+
+  .layout__nav {
+    /* 换行到第二行，占满整行 */
+    order: 3;
+    flex: none;
+    width: 100%;
+    gap: 2px;
+  }
+
+  .layout__nav-link {
+    /* 触摸目标从 32px 提到 36px，手指点得准一些 */
+    padding: 8px 12px;
+  }
+
+  .layout__actions {
+    margin-left: auto;
+  }
+
+  .layout__main {
+    padding: 14px;
+  }
+
+  .layout__user-name {
+    /* 用户区收窄，避免把 logo 挤走 */
+    max-width: 96px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
 </style>

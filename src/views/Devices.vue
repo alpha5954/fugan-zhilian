@@ -6,7 +6,7 @@
 // 结果状态（固件版本号、最后在线时间），不真的与设备通信。
 // 页面底部有明确标注，不伪装成真实操作。
 // ============================================================================
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormItemRule } from 'element-plus'
@@ -34,6 +34,21 @@ const STATUS_TAG: Record<DeviceStatus, 'success' | 'info' | 'warning'> = {
 
 /** 正在执行操作的设备 id —— 按行显示 loading，避免整表转圈 */
 const busyId = ref<string | null>(null)
+
+// ---------------------------------------------------------------------------
+// 窄屏下的表格处理
+// ---------------------------------------------------------------------------
+// 「操作」列是 fixed="right" 的，宽度 220px。在 375px 的手机上它会浮在
+// 右侧、占掉近 60% 的屏宽，把内容挤到读不了。窄屏时取消固定，让用户
+// 横向滚动去够 —— 这是表格在小屏上更常见的处理方式。
+const narrow = ref(false)
+const mq = window.matchMedia('(max-width: 768px)')
+const syncNarrow = () => {
+  narrow.value = mq.matches
+}
+syncNarrow()
+mq.addEventListener('change', syncNarrow)
+onUnmounted(() => mq.removeEventListener('change', syncNarrow))
 
 const onlineCount = computed(() => devices.onlineCount)
 
@@ -268,7 +283,11 @@ onMounted(() => {
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column
+          label="操作"
+          width="220"
+          :fixed="narrow ? false : 'right'"
+        >
           <template #default="{ row }">
             <el-button
               size="small"
