@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "check:simulator": "node scripts/check-simulator.ts"
+    "check:simulator": "node scripts/check-simulator.ts",
+    "check:assessment": "node scripts/check-assessment.ts",
+    "check": "npm run check:simulator && npm run check:assessment"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

@@ -47,7 +47,7 @@ const GAUGE_FACTOR = 5.68 // 0–50% 应变区间的灵敏度系数
 const TCR = -1.04 // %·°C⁻¹，负温度系数
 const TEMP_REFERENCE = 33.0 // 温度分量的参考点，°C
 
-/** 膝关节屈曲角度的活动范围（度） */
+/** 膝关节屈曲角度的默认活动范围（度） */
 const ANGLE_MIN = 5
 const ANGLE_MAX = 95
 
@@ -57,6 +57,26 @@ const STRAIN_AT_MAX = 32
 
 /** 一次动作循环的时长，毫秒 */
 const REP_PERIOD_REHAB = 4000
+
+/**
+ * 动作档位：不同康复动作的关节活动范围与节奏差异很大。
+ *
+ * 静力动作（靠墙静蹲）几乎没有关节位移，只在目标角度附近小幅维持；
+ * 屈膝滑动则是全幅度屈伸。用同一套参数会让所有会话的 ROM 完全一致，
+ * 对比图和达标判定就失去意义了。
+ */
+export interface MotionProfile {
+  angleMin: number
+  angleMax: number
+  /** 一次动作循环的时长，毫秒 */
+  periodMs: number
+}
+
+const DEFAULT_PROFILE: MotionProfile = {
+  angleMin: ANGLE_MIN,
+  angleMax: ANGLE_MAX,
+  periodMs: REP_PERIOD_REHAB,
+}
 
 /** 热敷升温的总时长与温度区间 */
 const HOTPACK_RAMP_MS = 90_000
@@ -74,6 +94,9 @@ const EMG_BASELINE = 0.04
 export class SignalSimulator {
   scenario: MonitorScenario
 
+  /** 当前动作档位，决定关节活动范围与节奏 */
+  private profile: MotionProfile
+
   private t = 0
   /** 温度随机游走的累积量，带回归项避免无限漂移 */
   private tempNoise = 0
@@ -82,8 +105,9 @@ export class SignalSimulator {
   /** 校准时的温度基线，calibrate() 会重设 */
   private tempBaseline = TEMP_REFERENCE
 
-  constructor(scenario: MonitorScenario = 'rehab') {
+  constructor(scenario: MonitorScenario = 'rehab', profile: Partial<MotionProfile> = {}) {
     this.scenario = scenario
+    this.profile = { ...DEFAULT_PROFILE, ...profile }
   }
 
   /** 切换场景并重置状态 */
@@ -181,11 +205,12 @@ export class SignalSimulator {
       }
     }
 
-    const phase = (this.t % REP_PERIOD_REHAB) / REP_PERIOD_REHAB
+    const { angleMin, angleMax, periodMs } = this.profile
+    const phase = (this.t % periodMs) / periodMs
 
     // 用余弦保证起止平滑，无突变
     const angle =
-      ANGLE_MIN + ((ANGLE_MAX - ANGLE_MIN) * (1 - Math.cos(2 * Math.PI * phase))) / 2
+      angleMin + ((angleMax - angleMin) * (1 - Math.cos(2 * Math.PI * phase))) / 2
 
     // 肌电包络集中在向心收缩期（phase ≈ 0.25），离心期明显减弱 ——
     // 这与真实膝关节康复动作的肌电模式一致
