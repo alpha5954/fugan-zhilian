@@ -1,7 +1,13 @@
 <script setup lang="ts">
-import HelloWorld from './components/HelloWorld.vue'
+// ============================================================================
+// 根组件
+// ============================================================================
+// 只负责渲染当前路由。布局由路由表决定：受保护的页面套 DefaultLayout，
+// 登录页不套（见 src/router/index.ts）。
+// ============================================================================
+import { RouterView } from 'vue-router'
 </script>
 
 <template>
-  <HelloWorld />
+  <RouterView />
 </template>
