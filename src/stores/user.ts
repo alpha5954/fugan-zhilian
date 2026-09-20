@@ -107,6 +107,83 @@ export const useUserStore = defineStore('user', () => {
     return true
   }
 
+  /**
+   * 邮箱密码登录。
+   *
+   * 成功后立刻把 profiles 拉回来，而不是等 onAuthStateChange 回调里那个
+   * setTimeout 去拉 —— 否则登录页跳转到首页时资料还没到，
+   * 导航栏会先空一下再显示用户名。
+   */
+  async function signIn(email: string, password: string): Promise<boolean> {
+    error.value = null
+    loading.value = true
+    try {
+      const { data, error: err } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      })
+      if (err) throw err
+
+      session.value = data.session
+      await fetchProfile()
+      return true
+    } catch (e) {
+      error.value = toMessage(e, '登录失败')
+      return false
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
+   * 注册新账号。
+   *
+   * 返回 needsEmailConfirmation 供页面区分两种情况：
+   *   - 项目开启了邮箱确认（Supabase 默认开启）→ signUp 不返回 session，
+   *     用户必须先去邮箱点确认链接才能登录
+   *   - 关闭了邮箱确认 → 直接拿到 session，视为注册即登录
+   *
+   * role 只能传 patient / family。数据库那边的 handle_new_user 触发器
+   * 有白名单，传别的值会被静默降级成 patient —— 治疗师和管理员必须
+   * 由后台手动提升，防止有人注册时给自己提权。
+   */
+  async function signUp(
+    email: string,
+    password: string,
+    options: { displayName?: string; role?: 'patient' | 'family' } = {},
+  ): Promise<{ ok: boolean; needsEmailConfirmation: boolean }> {
+    error.value = null
+    loading.value = true
+    try {
+      const { data, error: err } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          // 这些字段会进 auth.users.raw_user_meta_data，
+          // 由 handle_new_user 触发器读出来写进 profiles
+          data: {
+            display_name: options.displayName?.trim() || undefined,
+            role: options.role ?? 'patient',
+          },
+        },
+      })
+      if (err) throw err
+
+      if (!data.session) {
+        return { ok: true, needsEmailConfirmation: true }
+      }
+
+      session.value = data.session
+      await fetchProfile()
+      return { ok: true, needsEmailConfirmation: false }
+    } catch (e) {
+      error.value = toMessage(e, '注册失败')
+      return { ok: false, needsEmailConfirmation: false }
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function signOut(): Promise<void> {
     const { error: err } = await supabase.auth.signOut()
     if (err) {
@@ -186,6 +263,8 @@ export const useUserStore = defineStore('user', () => {
     init,
     fetchProfile,
     updateProfile,
+    signIn,
+    signUp,
     signOut,
     reset,
   }
