@@ -38,10 +38,9 @@ const roleLabel = computed(() =>
 // 未登录时（比如在公开的「关于」页）不显示主导航
 const showNav = computed(() => user.isLoggedIn)
 
-// 只有拉取过数据才显示角标 —— 否则一进页面就先闪一个 0，很怪
-const alertBadge = computed(() =>
-  alerts.loaded ? alerts.unacknowledgedCount : 0,
-)
+// 用精确总数而非按列表统计 —— 列表有 limit，行数一多就会少算。
+// 该值由首页挂载时调用 fetchUnacknowledgedCount() 填充。
+const alertBadge = computed(() => alerts.unacknowledgedTotal)
 
 /** 当前标签高亮。用前缀匹配，这样 /analysis/123 这种子路由也能正确点亮 */
 function isActive(path: string): boolean {

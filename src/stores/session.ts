@@ -17,6 +17,13 @@ import type {
   RehabSessionUpdate,
 } from '@/types'
 
+/** 今天零点（浏览器本地时区） */
+function startOfToday(): Date {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
 /** fetch 的可选筛选条件 */
 export interface SessionQuery {
   /** 只看某位患者的记录。不传则返回当前用户可见的全部（由 RLS 决定范围） */
@@ -36,10 +43,18 @@ export const useSessionStore = defineStore('session', () => {
   /** 按开始时间倒序，最近一次在最前 */
   const latest = computed(() => sessions.value[0] ?? null)
 
-  /** 今日训练次数 */
+  /**
+   * 今日训练次数的**精确值**，由 fetchTodayCount() 填充。
+   *
+   * 下面的 todayCount 只统计当前已加载的那批行，列表一旦分页就会少算。
+   * 首页头条数字不能靠这个。
+   */
+  const todayTotal = ref(0)
+
+  /** 今日训练次数 —— 基于已加载列表，仅用于列表内部展示 */
   const todayCount = computed(() => {
-    const today = new Date().toISOString().slice(0, 10)
-    return sessions.value.filter((s) => s.started_at.slice(0, 10) === today).length
+    const start = startOfToday().getTime()
+    return sessions.value.filter((s) => new Date(s.started_at).getTime() >= start).length
   })
 
   const byId = computed(
@@ -69,6 +84,26 @@ export const useSessionStore = defineStore('session', () => {
     } finally {
       loading.value = false
     }
+  }
+
+  /**
+   * 取今日训练次数的精确值。
+   *
+   * 时区要注意：按浏览器**本地时区**的今天零点算边界，再转成 UTC ISO
+   * 传给 PostgREST。若直接用 UTC 零点，东八区用户在早上 8 点前看到的
+   * 「今日」会从前一天算起。
+   */
+  async function fetchTodayCount(): Promise<void> {
+    const { count, error: err } = await supabase
+      .from('rehab_sessions')
+      .select('*', { count: 'exact', head: true })
+      .gte('started_at', startOfToday().toISOString())
+
+    if (err) {
+      error.value = toMessage(err, '统计今日训练次数失败')
+      return
+    }
+    todayTotal.value = count ?? 0
   }
 
   async function create(payload: RehabSessionInsert): Promise<RehabSession | null> {
@@ -135,6 +170,7 @@ export const useSessionStore = defineStore('session', () => {
     sessions.value = []
     loaded.value = false
     error.value = null
+    todayTotal.value = 0
   }
 
   return {
@@ -143,9 +179,11 @@ export const useSessionStore = defineStore('session', () => {
     loaded,
     error,
     latest,
+    todayTotal,
     todayCount,
     byId,
     fetch,
+    fetchTodayCount,
     create,
     update,
     remove,

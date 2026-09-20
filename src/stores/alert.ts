@@ -34,7 +34,16 @@ export const useAlertStore = defineStore('alert', () => {
   const loaded = ref(false)
   const error = ref<string | null>(null)
 
-  /** 未处理数量 —— 导航栏红点用 */
+  /**
+   * 未处理预警的**精确总数**，由 fetchUnacknowledgedCount() 填充。
+   *
+   * 与下面基于列表计算的 unacknowledgedCount 不同：那个只统计当前已加载
+   * 的那批行，列表分页或加了 limit 之后就会少算。导航栏红点要给准数，
+   * 所以用单独一次 head 请求取。
+   */
+  const unacknowledgedTotal = ref(0)
+
+  /** 未处理数量 —— 基于已加载列表，仅用于列表内部展示 */
   const unacknowledgedCount = computed(
     () => alerts.value.filter((a) => a.acknowledged_at === null).length,
   )
@@ -82,6 +91,26 @@ export const useAlertStore = defineStore('alert', () => {
     } finally {
       loading.value = false
     }
+  }
+
+  /**
+   * 取未处理预警的精确总数。
+   *
+   * `head: true` 让 PostgREST 只返回计数和响应头、不返回任何行数据，
+   * 比拉回全部行再在本地统计便宜得多。RLS 依然生效，统计范围仍是
+   * 当前用户可见的那些预警。
+   */
+  async function fetchUnacknowledgedCount(): Promise<void> {
+    const { count, error: err } = await supabase
+      .from('alerts')
+      .select('*', { count: 'exact', head: true })
+      .is('acknowledged_at', null)
+
+    if (err) {
+      error.value = toMessage(err, '统计未处理预警失败')
+      return
+    }
+    unacknowledgedTotal.value = count ?? 0
   }
 
   async function create(payload: AlertInsert): Promise<Alert | null> {
@@ -138,6 +167,8 @@ export const useAlertStore = defineStore('alert', () => {
 
     const updated = data[0]
     alerts.value = alerts.value.map((a) => (a.id === id ? updated : a))
+    // 已处理数量变了，同步刷新精确计数（用户主动操作，多一次请求无感）
+    void fetchUnacknowledgedCount()
     return true
   }
 
@@ -174,6 +205,7 @@ export const useAlertStore = defineStore('alert', () => {
     alerts.value = []
     loaded.value = false
     error.value = null
+    unacknowledgedTotal.value = 0
   }
 
   return {
@@ -181,10 +213,12 @@ export const useAlertStore = defineStore('alert', () => {
     loading,
     loaded,
     error,
+    unacknowledgedTotal,
     unacknowledgedCount,
     criticalCount,
     sorted,
     fetch,
+    fetchUnacknowledgedCount,
     create,
     setAcknowledged,
     acknowledge,

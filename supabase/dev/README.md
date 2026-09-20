@@ -54,6 +54,7 @@ docker exec fugan-pgtest psql -U postgres -d postgres \
 | `00_supabase_stub.sql` | 补出 Supabase 托管环境才有的东西：`auth` schema、`auth.users` 表、`auth.uid()` / `auth.role()` 函数、`anon` / `authenticated` 角色。原生 postgres 镜像里没有这些，迁移会报"关系不存在" |
 | `rls_behaviour_test.sql` | 造 4 个测试用户（含一个试图注册成 admin 的），用 `SET ROLE` + 伪造 JWT 身份实际跑一遍读写，断言每一条策略的行为 |
 | `e2e_auth.py` | 对**真实 Supabase 项目**跑认证链路：注册 → 触发器建档 → 角色白名单 → 登录 → RLS 隔离。18 项断言 |
+| `e2e_dashboard.py` | 插数据跑一遍首页用的查询，重点验「今日训练次数」的**时区边界**。19 项断言，跑完自动清理自己插入的行 |
 
 ## 两套测试的分工
 
@@ -76,7 +77,24 @@ Authentication → Sign In / Providers → Email → 关掉 Confirm email
 
 改完 `GET /auth/v1/settings` 里的 `mailer_autoconfirm` 会变成 `true`。
 
-⚠️ 每次运行会创建两个测试账号（邮箱带时间戳后缀）。跑完去 **Authentication → Users** 搜 `e2e-` 批量删除。
+⚠️ 每次运行会创建测试账号（邮箱带时间戳后缀）。跑完去 **Authentication → Users** 搜 `e2e-` 批量删除。
+
+`e2e_dashboard.py` 还会插入设备/训练记录/预警，但脚本在 `finally` 里删掉自己创建的行，不会残留数据。只有账号本身需要手动清。
+
+## 为什么「今日」的时区边界值得单独测
+
+数据库存的是 `timestamptz`（UTC），而用户说的「今天」是**本地时区**的今天。
+
+东八区（UTC+8）的今天零点对应 UTC 前一天 16:00。如果查询直接用 UTC 零点：
+
+```
+本地 2026-09-20 00:00  →  UTC 2026-09-19 16:00   ← 真正的边界
+UTC  2026-09-20 00:00  →  本地 2026-09-20 08:00  ← 错误边界，晚了 8 小时
+```
+
+后果是**本地时间 0:00–8:00 之间产生的记录全部漏统计**。对康复训练来说，早上 6 点做训练是很正常的事，这个 bug 会真实发生而且很难被发现——数字看起来只是"小了"，不报错。
+
+`e2e_dashboard.py` 里那条「昨日 23:59」的边界用例就是专门卡这个的。
 
 ## 与线上环境的差异
 
