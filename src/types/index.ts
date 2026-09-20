@@ -191,6 +191,8 @@ export type RehabSession = {
   rom_deg: number | null
   /** 该次训练期间的局部皮温峰值（摄氏度） */
   temp_c: number | null
+  /** 肌电均方根值（mV）—— 肌肉激活强度。迁移 4 新增 */
+  rms_mv: number | null
   /** 模型识别置信度，0~1 */
   confidence: number | null
 

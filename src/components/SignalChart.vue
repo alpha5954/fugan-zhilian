@@ -8,7 +8,8 @@
 
 export interface ChartSeries {
   name: string
-  data: number[]
+  /** 允许 null —— 某天没有该动作的记录时留断点，而不是画成 0 */
+  data: (number | null)[]
   color: string
   /** 1 表示使用右侧 Y 轴 */
   yAxisIndex?: 0 | 1
@@ -142,6 +143,8 @@ function buildOption() {
         yAxisIndex: s.yAxisIndex ?? 0,
         showSymbol: false,
         smooth: s.smooth ?? false,
+        // 不连接断点：中间缺数据的日子要留空，直接连起来会掩盖"那天没练"
+        connectNulls: false,
         // 点多了必须开抽稀，否则每帧要画的点数翻几倍
         sampling: s.sampling === false ? undefined : ('lttb' as const),
         lineStyle: { width: s.width ?? 1.4, color: s.color },

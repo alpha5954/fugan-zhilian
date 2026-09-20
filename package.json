@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "check:simulator": "node scripts/check-simulator.ts",
     "check:assessment": "node scripts/check-assessment.ts",
-    "check": "npm run check:simulator && npm run check:assessment"
+    "check:analysis": "node scripts/check-analysis.ts",
+    "check": "npm run check:simulator && npm run check:assessment && npm run check:analysis"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

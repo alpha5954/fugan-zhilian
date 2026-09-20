@@ -70,14 +70,26 @@ console.log('='.repeat(70))
 console.log('3. 生理指标范围')
 console.log('='.repeat(70))
 
+// 上界取 105 而非 100：屈膝滑动的设计范围是 5–100°，叠加 ±6% 的会话波动后
+// 最大可到 100×1.06−5 ≈ 101°，卡在 100 会偶发误报。膝关节正常屈曲可达 135°，
+// 105 这个上界仍然能拦住真正离谱的值。
 check('ROM 为正且不超过膝关节生理上限',
-  sessions.every((s) => s.romMax > 0 && s.romMax <= 100),
+  sessions.every((s) => s.romMax > 0 && s.romMax <= 105),
   sessions.map((s) => s.romMax.toFixed(1)).join(', '))
 
-// ---- 分动作档位：不同动作的活动度必须真的不同 ----
+// ---- 分动作档位 ----
+// 注意不能断言"四个值互不相同" —— 直腿抬高和靠墙静蹲**设计上都是小 ROM**
+// （膝关节保持伸直 / 静力维持），叠加 ±6% 的会话波动后两者的取值区间是
+// 重叠的，偶发相同是正常的。断言各自落在自己的档位区间里才有意义。
 const romByExercise = sessions.map((s) => Math.round(s.romMax))
-check('四个动作的 ROM 各不相同（不再是一个恒定值）',
-  new Set(romByExercise).size === 4, romByExercise.join(', '))
+check('四个动作的 ROM 不再是一个恒定值',
+  new Set(romByExercise).size > 1, romByExercise.join(', '))
+check('各动作的 ROM 落在各自档位区间内',
+  sessions[0].romMax > 5 && sessions[0].romMax < 20 &&    // 直腿抬高：膝关节伸直
+  sessions[1].romMax > 60 && sessions[1].romMax < 90 &&   // 坐位伸膝：中等幅度
+  sessions[2].romMax > 80 && sessions[2].romMax < 105 &&  // 屈膝滑动：全幅度
+  sessions[3].romMax > 5 && sessions[3].romMax < 20,      // 靠墙静蹲：静力微调
+  romByExercise.join(', '))
 // 注意不能拿"靠墙静蹲 vs 其余动作最小值"来比 —— 直腿抬高同样是小 ROM
 // 动作（膝关节保持伸直），两个小 ROM 动作之间比不出大小。
 // 换成绝对判断：静力动作的 ROM 本就应该很小。

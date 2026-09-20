@@ -30,6 +30,10 @@ export interface SessionQuery {
   patientId?: string
   /** 只看某个关节 */
   joint?: JointName
+  /** 起始时间（含）。传本地时间的 Date，内部转 UTC 后比较 */
+  from?: Date
+  /** 结束时间（含） */
+  to?: Date
   /** 最多取多少条，默认 50 */
   limit?: number
 }
@@ -73,6 +77,10 @@ export const useSessionStore = defineStore('session', () => {
 
       if (options.patientId) query = query.eq('patient_id', options.patientId)
       if (options.joint) query = query.eq('joint', options.joint)
+      // 时间范围用 toISOString 转 UTC 再比较。数据库存的是 timestamptz，
+      // 直接传本地时间的字符串会差出一个时区偏移。
+      if (options.from) query = query.gte('started_at', options.from.toISOString())
+      if (options.to) query = query.lte('started_at', options.to.toISOString())
 
       const { data, error: err } = await query
       if (err) throw err

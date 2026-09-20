@@ -55,7 +55,7 @@ docker exec fugan-pgtest psql -U postgres -d postgres \
 | `rls_behaviour_test.sql` | 造 4 个测试用户（含一个试图注册成 admin 的），用 `SET ROLE` + 伪造 JWT 身份实际跑一遍读写，断言每一条策略的行为 |
 | `e2e_auth.py` | 对**真实 Supabase 项目**跑认证链路：注册 → 触发器建档 → 角色白名单 → 登录 → RLS 隔离。18 项断言 |
 | `e2e_dashboard.py` | 插数据跑一遍首页用的查询，重点验「今日训练次数」的**时区边界**。19 项断言，跑完自动清理自己插入的行 |
-| `e2e_assessment.py` | 康复评估页的入库链路：jsonb 波形往返、四条 check 约束、跨用户写入被拒。15 项断言，含 6 项「这些失败才是好事」的负面用例 |
+| `e2e_assessment.py` | 康复评估页的入库链路：jsonb 波形往返、五条 check 约束、rms_mv 精度、跨用户写入被拒。17 项断言，含 7 项「这些失败才是好事」的负面用例 |
 
 ## 两套测试的分工
 

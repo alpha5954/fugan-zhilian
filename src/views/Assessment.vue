@@ -169,6 +169,9 @@ async function save() {
       rep_count: form.repCount,
       rom_deg: Number(r.romMax.toFixed(2)),
       temp_c: Number(r.tempMax.toFixed(2)),
+      // numeric(6,4) —— 总共 6 位、小数 4 位，所以整数部分最多两位。
+      // RMS 是 mV 量级（0.0x ~ 1.x），不会溢出，但仍按列精度取整避免隐式舍入
+      rms_mv: Number(r.rmsAvg.toFixed(4)),
       confidence: Number(r.topConfidence.toFixed(3)),
       waveform: r.waveform,
       notes: form.notes.trim() || null,

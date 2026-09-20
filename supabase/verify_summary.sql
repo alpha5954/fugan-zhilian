@@ -99,6 +99,16 @@ ka_exec as (
     and routine_name = 'ping_keepalive'
     and grantee = 'anon'
     and privilege_type = 'EXECUTE'
+),
+-- 迁移 4 新增的肌电 RMS 列
+rms_col as (
+  select coalesce(
+    (select data_type || '(' || numeric_precision || ',' || numeric_scale || ')'
+     from information_schema.columns
+     where table_schema = 'public' and table_name = 'rehab_sessions'
+       and column_name = 'rms_mv'),
+    '(缺失)'
+  ) as spec
 )
 
 select 1 as 序号, 'public 下恰好 6 张表' as 检查项,
@@ -181,7 +191,13 @@ union all
 select 15, '【信息】public 下全部 security definer 函数',
        'INFO',
        sd_all.n || ' 个：' || sd_all.names
-from sd_all;
+from sd_all
+union all
+-- 迁移 4：肌电 RMS 列。缺了它数据分析页的肌力对比拿不到数据
+select 16, 'rehab_sessions.rms_mv 存在且为 numeric(6,4)',
+       case when rms_col.spec = 'numeric(6,4)' then 'PASS' else 'FAIL' end,
+       rms_col.spec
+from rms_col;
 
 -- ============================================================================
 -- 第 7 段那个心跳写入这里没重复做，避免每次核对都把 ping_count 加一。

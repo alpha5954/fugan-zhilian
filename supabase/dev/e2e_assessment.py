@@ -107,6 +107,7 @@ try:
         "rep_count": 8,
         "rom_deg": 12.22,
         "temp_c": 33.44,
+        "rms_mv": 0.2713,
         "confidence": 0.915,
         "waveform": waveform,
         "notes": "e2e 测试记录",
@@ -142,6 +143,8 @@ try:
     check("rom_deg 精度保留", abs(r["rom_deg"] - 12.22) < 1e-9, str(r["rom_deg"]))
     check("confidence 落在 [0,1]（数据库 check 约束）",
           0 <= r["confidence"] <= 1, str(r["confidence"]))
+    check("rms_mv 写入并保持 numeric(6,4) 精度",
+          abs(r["rms_mv"] - 0.2713) < 1e-9, str(r["rms_mv"]))
     check("recognized 字段写入", r["recognized"] == "直腿抬高", str(r["recognized"]))
     check("ended_at 晚于 started_at",
           r["ended_at"] > r["started_at"], f"{r['started_at']} → {r['ended_at']}")
@@ -171,6 +174,11 @@ try:
     bad4["ended_at"] = (started - timedelta(minutes=5)).isoformat()
     st, _ = call("POST", "/rest/v1/rehab_sessions", bad4, token=token)
     check("ended_at 早于 started_at 被拒绝", st >= 400, f"HTTP {st}")
+
+    bad5 = dict(payload)
+    bad5["rms_mv"] = -0.5
+    st, _ = call("POST", "/rest/v1/rehab_sessions", bad5, token=token)
+    check("rms_mv 为负被 check 约束拒绝", st >= 400, f"HTTP {st}")
 
     # 以他人身份插入 —— RLS 应当拒绝
     st2, other = call("POST", "/auth/v1/signup",
