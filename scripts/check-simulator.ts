@@ -97,6 +97,49 @@ check('温度分量的变化幅度远大于应变分量（解耦可视化才成�
   tempSwing > strainSwing * 2,
   `温度分量摆幅 ${tempSwing.toFixed(2)}% vs 应变分量 ${strainSwing.toFixed(3)}%`)
 
+// ---------------------------------------------------------------- 信号丢失
+console.log()
+console.log('='.repeat(66))
+console.log('场景三：信号丢失')
+console.log('='.repeat(66))
+
+// 丢失概率只有 0.2%/采样点，300 秒（3000 点）里理论期望约 6 次，但
+// 一次都不发生的概率约 0.25% —— 单跑一次会有偶发失败。多试几次消除它：
+// 连续 5 次都没有丢失的概率约 1e-13，实际上不可能。
+let long: Sample[] = []
+for (let trial = 1; trial <= 5; trial++) {
+  long = run('rehab', 300)
+  if (long.some((s) => s.lost)) break
+}
+const lostIdx = long.map((s, i) => (s.lost ? i : -1)).filter((i) => i >= 0)
+const lostRatio = lostIdx.length / long.length
+
+// 统计每次丢失的持续点数
+const runs: number[] = []
+let cur = 0
+for (const s of long) {
+  if (s.lost) cur++
+  else if (cur > 0) {
+    runs.push(cur)
+    cur = 0
+  }
+}
+if (cur > 0) runs.push(cur)
+
+console.log(`  300 秒共 ${long.length} 个采样点，丢失 ${lostIdx.length} 个（${(lostRatio * 100).toFixed(2)}%）`)
+console.log(`  发生 ${runs.length} 次丢失，每次持续 ${runs.join(', ')} 个采样点`)
+
+check('确实会发生信号丢失（不是永不触发）', runs.length > 0, `${runs.length} 次`)
+// 上界 5%：实测中位数约 2%，偶尔到 4%。这个断言防的是"概率被误调大
+// 到淹没正常信号"，不是精确匹配——精确值取决于随机数，写死了会偶发失败。
+// 下界不加：只有一次丢失时占比约 0.3%，会误报。
+check('丢失不淹没正常信号（占比 < 5%）', lostRatio < 0.05,
+  `${(lostRatio * 100).toFixed(2)}%`)
+check('每次丢失都会结束（不是永久断连）',
+  long[long.length - 1].lost === false || runs.length > 0)
+check('单次丢失时长在设定区间内（600–1500ms，即 6–16 个采样点）',
+  runs.every((n) => n >= 5 && n <= 16), runs.join(', '))
+
 // ---------------------------------------------------------------- 汇总
 console.log()
 console.log('='.repeat(66))

@@ -11,6 +11,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormItemRule } from 'element-plus'
 
+import StateBlock from '@/components/StateBlock.vue'
 import { formatRelative } from '@/lib/format'
 import { useDeviceStore } from '@/stores/device'
 import { useUserStore } from '@/stores/user'
@@ -67,6 +68,9 @@ function openDialog() {
 
 async function submit() {
   if (!formRef.value) return
+  // 前置守卫：序列号输入框上的 @keyup.enter 不走按钮的 loading 禁用
+  if (submitting.value) return
+
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
 
@@ -206,6 +210,9 @@ onMounted(() => {
           <el-button type="primary" @click="openDialog">添加设备</el-button>
         </div>
       </header>
+
+      <!-- 拉取失败时给出重试出口；表格自带的 empty-text 只覆盖"确实没有数据" -->
+      <StateBlock :error="devices.error" @retry="devices.fetchAll()" />
 
       <el-table
         v-loading="devices.loading"

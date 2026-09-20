@@ -9,6 +9,7 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 
+import StateBlock from '@/components/StateBlock.vue'
 import { PERFORMANCE_METRICS, PROJECT } from '@/constants/project'
 import { formatRelative } from '@/lib/format'
 import { useAlertStore } from '@/stores/alert'
@@ -113,9 +114,10 @@ const entries = [
   },
 ] as const
 
-onMounted(async () => {
+async function reload() {
+  loading.value = true
   try {
-    // 三个请求互不依赖，并发发出
+    // 四个请求互不依赖，并发发出
     await Promise.all([
       sessions.fetch({ limit: 20 }),
       sessions.fetchTodayCount(),
@@ -125,7 +127,19 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-})
+}
+
+/**
+ * 任一 store 出错就展示出来。
+ *
+ * 之前这里什么都没有 —— 拉取失败时四张卡片会静静地显示 0 和"—"，
+ * 与"确实还没有数据"完全无法区分。用户只会以为系统坏了或者自己没记录。
+ */
+const loadError = computed(
+  () => sessions.error ?? alerts.error ?? devices.error ?? null,
+)
+
+onMounted(reload)
 </script>
 
 <template>
@@ -137,6 +151,10 @@ onMounted(async () => {
       </h1>
       <p class="dash__subtitle">{{ PROJECT.subtitle }}</p>
     </header>
+
+    <!-- 拉取失败时给出出口。loading / empty 都为 false，
+         所以这里只会在有错误时渲染出提示，正常情况下什么都不显示 -->
+    <StateBlock :error="loadError" @retry="reload" />
 
     <!-- 核心指标 -->
     <section class="dash__cards">

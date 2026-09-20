@@ -67,6 +67,9 @@ watch(mode, () => {
 // ---------------------------------------------------------------------------
 async function handleSubmit() {
   if (!formRef.value) return
+  // 前置守卫：按钮的 loading 会禁用点击，但输入框上的 @keyup.enter
+  // 不走按钮，快速连按回车能绕过去，重复发起请求
+  if (submitting.value) return
 
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return

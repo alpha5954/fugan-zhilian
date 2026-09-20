@@ -11,8 +11,14 @@ import { REHAB_EXERCISES, targetFor } from './assessment.ts'
 import { formatDate } from './format.ts'
 import type { RehabSession } from '@/types'
 
-/** 温度预警阈值，与实时监测页保持一致 */
-export const TEMP_ALERT_THRESHOLD = 45
+// 温度预警阈值只在 simulator.ts 定义一处，这里再导出给调用方用。
+// 原先两个文件各写一份 45 —— 改了一处忘了另一处，监测页和分析页就会
+// 对"什么算超标"给出不同答案，而且不会有任何报错。
+//
+// 注意必须先 import 再 export：`export { X } from '...'` 只做转发，
+// 不会把 X 引入本模块作用域，文件内部用不了。
+import { TEMP_ALERT_THRESHOLD } from './simulator.ts'
+export { TEMP_ALERT_THRESHOLD }
 
 // ---------------------------------------------------------------------------
 // 通用

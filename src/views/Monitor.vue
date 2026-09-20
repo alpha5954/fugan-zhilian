@@ -7,6 +7,8 @@
 // ============================================================================
 import { computed, onMounted } from 'vue'
 
+import { ElMessage } from 'element-plus'
+
 import SignalChart from '@/components/SignalChart.vue'
 import type { ChartAxis, ChartSeries } from '@/components/SignalChart.vue'
 import { useMonitor } from '@/composables/useMonitor'
@@ -36,6 +38,8 @@ const {
   calibrate,
   setScenario,
   exportCsv,
+  signalLost,
+  tempAlertOn,
 } = monitor
 
 const canExport = computed(() => monitor.samples.value.length > 0)
@@ -46,6 +50,18 @@ const scenarioModel = computed({
   get: () => scenario.value,
   set: (next: MonitorScenario) => setScenario(next),
 })
+
+/** 校准后给个反馈 —— 原先点了没有任何提示，用户不知道是否生效 */
+function onCalibrate() {
+  if (!latest.value) {
+    ElMessage.warning('尚无有效读数，无法校准。请先开始采集并确认信号正常。')
+    return
+  }
+  calibrate()
+  ElMessage.success(
+    `已按当前温度 ${latest.value.temp.toFixed(2)} °C 重置基线，温度分量以此为参考点计算`,
+  )
+}
 
 // ---------------------------------------------------------------------------
 // 设备状态栏
@@ -110,6 +126,27 @@ const decoupleLegend = [
 
 <template>
   <div class="monitor">
+    <!-- 温度越阈是安全关键告警 —— 低温烫伤不可逆，必须醒目 -->
+    <el-alert
+      v-if="tempAlertOn"
+      type="error"
+      :closable="false"
+      show-icon
+      title="局部温度已超过安全阈值"
+      :description="`当前 ${latest ? latest.temp.toFixed(1) : '—'} °C，阈值 ${tempThreshold} °C。` +
+        '皮肤接触 44 °C 持续 6 小时、或接触 50 °C 仅需 5 分钟即可造成不可逆低温烫伤。请立即调整或移开热源。'"
+    />
+
+    <!-- 信号丢失：设备不可信，提醒但不打断 -->
+    <el-alert
+      v-if="signalLost"
+      type="warning"
+      :closable="false"
+      show-icon
+      title="信号中断"
+      description="传感器当前无有效读数，图表已断开。请检查电极是否贴合、设备是否在连接范围内。"
+    />
+
     <!-- 设备状态栏 -->
     <section class="statusbar">
       <div class="statusbar__group">
@@ -119,6 +156,12 @@ const decoupleLegend = [
         />
         <span class="statusbar__value">{{ running ? '采集中' : '已暂停' }}</span>
         <el-tag size="small" type="warning" effect="plain">模拟数据</el-tag>
+        <el-tag v-if="signalLost" size="small" type="danger" effect="dark">
+          信号丢失
+        </el-tag>
+        <el-tag v-if="tempAlertOn" size="small" type="danger" effect="dark">
+          温度超标
+        </el-tag>
       </div>
 
       <div class="statusbar__divider" />
@@ -149,9 +192,10 @@ const decoupleLegend = [
         <span class="statusbar__label">皮肤温度</span>
         <span
           class="statusbar__value statusbar__value--mono"
-          :class="{ 'is-alert': overThreshold }"
+          :class="{ 'is-alert': overThreshold, 'is-stale': signalLost }"
         >
           {{ latest ? latest.temp.toFixed(2) : '—' }} °C
+          <span v-if="signalLost" class="statusbar__stale">（失联前）</span>
         </span>
       </div>
     </section>
@@ -176,7 +220,7 @@ const decoupleLegend = [
         <el-button :type="running ? 'warning' : 'primary'" @click="toggle">
           {{ running ? '暂停' : '开始' }}
         </el-button>
-        <el-button @click="calibrate">校准</el-button>
+        <el-button @click="onCalibrate">校准</el-button>
         <el-button :disabled="!canExport" @click="exportCsv">导出 CSV</el-button>
         <el-button :disabled="!canExport" @click="reset">清空</el-button>
       </div>
@@ -312,6 +356,16 @@ const decoupleLegend = [
 .statusbar__value.is-alert {
   color: #f56c6c;
   font-weight: 600;
+}
+
+/* 信号丢失时显示的仍是最后一次可信读数，用弱化样式 + 括注说明，
+   避免用户把它当成当前值 */
+.statusbar__value.is-stale {
+  color: #a8abb2;
+}
+
+.statusbar__stale {
+  font-size: 11px;
 }
 
 /* ---------- 控制面板 ---------- */

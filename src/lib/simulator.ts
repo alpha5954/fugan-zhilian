@@ -38,6 +38,14 @@ export interface Sample {
   strainPart: number
   /** 解耦出的温度分量，% */
   tempPart: number
+  /**
+   * 本次采样是否处于**信号丢失**状态。
+   *
+   * 为 true 时上面几个测量值都不代表真实读数 —— 调用方应当把它们当作
+   * 空值处理（图表断线、状态栏显示"信号丢失"），而不是照常画出去。
+   * 真实设备上这对应电极脱落、蓝牙断连、接触阻抗过大等情况。
+   */
+  lost: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +97,21 @@ export const TEMP_ALERT_THRESHOLD = 45
 /** 基线噪声幅度，mV */
 const EMG_BASELINE = 0.04
 
+/**
+ * 信号丢失的模拟参数。
+ *
+ * 真实设备上电极脱落、蓝牙断连、接触阻抗过大都会导致信号中断。
+ * 这里按每个采样点的概率触发，持续一段随机时长后自动恢复。
+ *
+ * ⚠️ 概率是对**每个采样点**生效的，不是对"每次丢失事件"—— 每个 tick
+ *    都是一次机会。0.002 × 3000 点（5 分钟）≈ 6 次丢失，对应约 3% 的
+ *    采样点被标记为丢失。实测中位数就在 2% 附近。
+ *    想调稀疏些就调小这个值，注意别只看它本身、忘了乘采样点数。
+ */
+const DROPOUT_PROBABILITY = 0.002
+const DROPOUT_MIN_MS = 600
+const DROPOUT_MAX_MS = 1500
+
 // ---------------------------------------------------------------------------
 
 export class SignalSimulator {
@@ -104,6 +127,8 @@ export class SignalSimulator {
   private emgPhase = 0
   /** 校准时的温度基线，calibrate() 会重设 */
   private tempBaseline = TEMP_REFERENCE
+  /** 当前这次信号丢失还剩多少毫秒；> 0 表示正在丢失 */
+  private dropRemaining = 0
 
   constructor(scenario: MonitorScenario = 'rehab', profile: Partial<MotionProfile> = {}) {
     this.scenario = scenario
@@ -122,6 +147,7 @@ export class SignalSimulator {
     this.tempNoise = 0
     this.emgPhase = 0
     this.tempBaseline = TEMP_REFERENCE
+    this.dropRemaining = 0
   }
 
   /**
@@ -146,6 +172,18 @@ export class SignalSimulator {
    */
   next(dt: number): Sample {
     this.t += dt
+
+    // ---- 信号丢失 ----
+    // 注意：丢失期间**照常推进内部状态**（温度随机游走、动作周期），
+    // 只是把 lost 标记为 true 交给调用方决定怎么显示。若在这里冻结状态，
+    // 恢复时温度会从断点接续，看起来像"信号丢失期间温度被冻住了"。
+    if (this.dropRemaining > 0) {
+      this.dropRemaining -= dt
+    } else if (Math.random() < DROPOUT_PROBABILITY) {
+      this.dropRemaining =
+        DROPOUT_MIN_MS + Math.random() * (DROPOUT_MAX_MS - DROPOUT_MIN_MS)
+    }
+    const lost = this.dropRemaining > 0
 
     const temp = this.computeTemp()
     const { angle, envelope } = this.computeMotion()
@@ -173,7 +211,7 @@ export class SignalSimulator {
     // 这一行就是"耦合"本身，解耦算法的目标就是从它里面还原出上面两个分量
     const raw = strainPart + tempPart + (Math.random() - 0.5) * 1.6
 
-    return { t: this.t, emg, angle, temp, raw, strainPart, tempPart }
+    return { t: this.t, emg, angle, temp, raw, strainPart, tempPart, lost }
   }
 
   /** 局部温度 */

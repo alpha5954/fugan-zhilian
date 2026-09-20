@@ -12,6 +12,7 @@ import type { BarSeries } from '@/components/BarChart.vue'
 import PieChart from '@/components/PieChart.vue'
 import SignalChart from '@/components/SignalChart.vue'
 import type { ChartSeries } from '@/components/SignalChart.vue'
+import StateBlock from '@/components/StateBlock.vue'
 import {
   TEMP_ALERT_THRESHOLD,
   buildExerciseDistribution,
@@ -226,12 +227,13 @@ onMounted(load)
       </el-button>
     </section>
 
-    <el-empty
-      v-if="!loading && !hasData"
-      description="所选范围内还没有训练记录。去「康复评估」记录一次训练，或放宽筛选范围。"
-    />
-
-    <template v-else>
+    <StateBlock
+      :loading="loading"
+      :error="sessions.error"
+      :empty="!hasData"
+      empty-text="所选范围内还没有训练记录。去「康复评估」记录一次训练，或放宽筛选范围。"
+      @retry="load"
+    >
       <!-- 概要 -->
       <section class="summary">
         <div class="summary__item">
@@ -340,7 +342,7 @@ onMounted(load)
           </div>
         </article>
       </section>
-    </template>
+    </StateBlock>
   </div>
 </template>
 

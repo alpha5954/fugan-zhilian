@@ -143,6 +143,8 @@ const savedId = ref<string | null>(null)
 
 async function save() {
   if (!result.value) return
+  // 前置守卫：防止重复点击造成同一会话被写入多条
+  if (saving.value) return
 
   const patientId = user.userId
   if (!patientId) {
