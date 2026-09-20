@@ -1,0 +1,71 @@
+name: Supabase 保活心跳
+
+# ============================================================================
+# Supabase 免费版项目连续 7 天没有活动会被自动暂停，恢复要人工操作。
+# 这个工作流每天调一次数据库里的 ping_keepalive()，维持项目活跃。
+#
+# 数据库侧已经就绪（见 supabase/migrations/20260920090200_keepalive_seed.sql）：
+#   - keepalive 表，只有一行
+#   - ping_keepalive() 函数，security definer，原子自增计数
+#   - anon 角色有 EXECUTE 权限，无需表的 UPDATE 权限
+# 这里补的是"调用方"。
+#
+# 关于密钥：SUPABASE_ANON_KEY 是公开密钥——它会打包进前端 JS，任何人
+# 打开浏览器都能看到，本身不构成权限边界（真正的边界是 RLS）。
+# 放在 GitHub Secrets 里主要是避免在公开仓库中暴露项目地址、招来扫描流量。
+# ============================================================================
+
+on:
+  schedule:
+    # 每天 UTC 02:23（北京时间 10:23）执行。
+    # 刻意避开整点——GitHub 的定时任务队列在整点前后最拥挤，延迟最明显。
+    - cron: '23 2 * * *'
+  # 支持在 Actions 页面手动触发，便于首次验证和排障
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 校验 secrets 已配置
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          missing=""
+          [ -z "$SUPABASE_URL" ]      && missing="$missing SUPABASE_URL"
+          [ -z "$SUPABASE_ANON_KEY" ] && missing="$missing SUPABASE_ANON_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少仓库 secret:$missing"
+            echo "前往 Settings → Secrets and variables → Actions → New repository secret 添加"
+            exit 1
+          fi
+          echo "secrets 已配置"
+
+      - name: 调用 ping_keepalive
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          # --fail-with-body：HTTP >= 400 时让 curl 以非零码退出，同时保留
+          # 响应体，便于从日志直接看到 Supabase 返回的错误原因
+          resp=$(curl -sS --fail-with-body --max-time 30 \
+                      --retry 3 --retry-delay 5 \
+                 -X POST "${SUPABASE_URL%/}/rest/v1/rpc/ping_keepalive" \
+                 -H "apikey: ${SUPABASE_ANON_KEY}" \
+                 -H "Authorization: Bearer ${SUPABASE_ANON_KEY}" \
+                 -H "Content-Type: application/json" \
+                 -d '{}')
+
+          echo "响应：${resp}"
+
+          # 只看 HTTP 200 不够——RPC 返回空对象也是 200。
+          # 必须确认响应里真的带了 ping_count，否则说明没有真正写入。
+          echo "$resp" | grep -q '"ping_count"' || {
+            echo "::error::响应中没有 ping_count 字段，保活可能未真正写入数据库"
+            exit 1
+          }
+
+          echo "✅ 保活成功"

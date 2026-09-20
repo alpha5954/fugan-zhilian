@@ -78,3 +78,18 @@ public/                  # 原样拷贝到构建产物根目录
 ## 开发状态
 
 项目骨架阶段。路由、状态管理、Supabase 客户端接入尚未配置。
+
+## 运维：Supabase 保活
+
+Supabase 免费版项目连续 **7 天无活动会被自动暂停**，恢复需人工操作。`.github/workflows/keepalive.yml` 每天调用一次数据库里的 `ping_keepalive()` 维持活跃。
+
+首次使用需在仓库中添加两个 secret（Settings → Secrets and variables → Actions）：
+
+| Secret | 值 |
+|---|---|
+| `SUPABASE_URL` | `https://<项目ref>.supabase.co` |
+| `SUPABASE_ANON_KEY` | publishable key 或 anon key |
+
+加完在 Actions 页面手动跑一次验证。两个 secret 缺任意一个，工作流会明确报错而不是静默失败。
+
+⚠️ **GitHub 会在仓库连续 60 天无活动后停用定时工作流。** 开发期间有提交所以不受影响，但项目如果长期搁置需要留意——届时去 Actions 页面手动重新启用即可。
