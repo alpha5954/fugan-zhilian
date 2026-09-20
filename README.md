@@ -122,6 +122,17 @@ supabase/
 
 `@` 别名指向 `src/`，配置同时存在于 `vite.config.ts`（构建期）与 `tsconfig.app.json`（类型检查），修改时需保持两处一致。
 
+### 数据库核对脚本
+
+两个脚本都在 Supabase SQL Editor 里执行，用途不同：
+
+| 文件 | 用途 |
+|---|---|
+| `supabase/verify_migrations.sql` | **精简版**，6 项。只回答"迁移都应用了没"，适合快速粘贴 |
+| `supabase/verify_summary.sql` | **完整版**，18 项。含策略、触发器、列级授权等明细，迁移后完整核对用 |
+
+> ⚠️ `verify_summary.sql` 有 222 行，粘贴时容易只选中一部分，导致 `syntax error at end of input`。日常检查用精简版。
+
 ## 开发状态
 
 | 阶段 | 内容 | 状态 |
