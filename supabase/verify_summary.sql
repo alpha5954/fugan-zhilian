@@ -7,7 +7,7 @@
 --
 -- 想看明细（策略清单、函数清单等）再用 verify_rls.sql 逐段选中执行。
 --
--- 期望输出：15 行。序号 1-14 的结果列应全部 PASS；
+-- 期望输出：18 行。序号 1-14 与 16-18 的结果列应全部 PASS；
 -- 第 15 行是 INFO，只列出 public 下所有 security definer 函数供辨认，不参与判断。
 -- ============================================================================
 
@@ -49,7 +49,7 @@ alert_cols as (
   where table_schema = 'public' and grantee = 'authenticated'
     and privilege_type = 'UPDATE' and table_name = 'alerts'
 ),
--- 本项目自己建的 7 个 security definer 函数是否齐全。
+-- 本项目自己建的 8 个 security definer 函数是否齐全。
 -- 刻意不数"总数"——Supabase 自己也会在 public 下装辅助函数
 -- （比如启用自动 RLS 时的 rls_auto_enable），数总数会误报。
 sd_mine as (
@@ -60,7 +60,8 @@ sd_mine as (
     and p.prosecdef
     and p.proname in (
       'my_role', 'is_caregiver_of', 'is_patient_of', 'can_access_patient',
-      'enforce_care_link_transition', 'handle_new_user', 'ping_keepalive')
+      'enforce_care_link_transition', 'handle_new_user', 'ping_keepalive',
+      'claim_device')
 ),
 -- 信息行：public 下所有 security definer 函数，用于辨认多出来的那些
 sd_all as (
@@ -166,9 +167,9 @@ select 10, 'alerts 的 severity 列不可更新',
        case when alert_cols.cols like '%severity%' then '❌ severity 可被改！' else '已排除' end
 from alert_cols
 union all
-select 11, '本项目 7 个 security definer 函数齐全',
-       case when sd_mine.n = 7 then 'PASS' else 'FAIL' end,
-       sd_mine.n || '/7 个'
+select 11, '本项目 8 个 security definer 函数齐全',
+       case when sd_mine.n = 8 then 'PASS' else 'FAIL' end,
+       sd_mine.n || '/8 个'
 from sd_mine
 union all
 select 12, '关键触发器 = 5 个',
@@ -197,7 +198,23 @@ union all
 select 16, 'rehab_sessions.rms_mv 存在且为 numeric(6,4)',
        case when rms_col.spec = 'numeric(6,4)' then 'PASS' else 'FAIL' end,
        rms_col.spec
-from rms_col;
+from rms_col
+union all
+-- 迁移 5：设备认领 RPC。缺了它设备解绑后就再也绑不回来
+select 17, 'claim_device 可被 authenticated 调用',
+       case when (select count(*) from information_schema.routine_privileges
+                  where routine_schema = 'public' and routine_name = 'claim_device'
+                    and grantee = 'authenticated' and privilege_type = 'EXECUTE') = 1
+            then 'PASS' else 'FAIL' end,
+       '—'
+union all
+-- 反向断言：匿名不该能探测设备序列号
+select 18, 'claim_device 对 anon 不可调用（防序列号探测）',
+       case when (select count(*) from information_schema.routine_privileges
+                  where routine_schema = 'public' and routine_name = 'claim_device'
+                    and grantee = 'anon' and privilege_type = 'EXECUTE') = 0
+            then 'PASS' else 'FAIL' end,
+       '—';
 
 -- ============================================================================
 -- 第 7 段那个心跳写入这里没重复做，避免每次核对都把 ping_count 加一。

@@ -166,6 +166,21 @@ export type DeviceUpdate = Partial<
   Omit<Device, 'id' | 'serial_no' | 'created_at' | 'updated_at'>
 >
 
+/** claim_device() 的返回结构 */
+export interface ClaimDeviceResult {
+  ok: boolean
+  reason:
+    | 'claimed'
+    | 'already_owned'
+    | 'taken'
+    | 'not_found'
+    | 'invalid_serial'
+    | 'not_authenticated'
+  message: string
+  /** 成功时返回设备 id */
+  id?: string
+}
+
 
 // ---------------------------------------------------------------------------
 // rehab_sessions —— 康复训练记录
@@ -318,6 +333,15 @@ export interface Database {
       ping_keepalive: {
         Args: Record<string, never>
         Returns: { last_ping: Timestamp; ping_count: number }
+      }
+      /**
+       * 按序列号认领无主设备。
+       * security definer 函数 —— 绕过 RLS，内部自校验所有权。
+       * 返回值用 reason 区分各种失败，便于前端给出准确提示。
+       */
+      claim_device: {
+        Args: { p_serial: string }
+        Returns: ClaimDeviceResult
       }
     }
     Enums: {

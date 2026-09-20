@@ -1,17 +1,470 @@
 <script setup lang="ts">
-import PagePlaceholder from '@/components/PagePlaceholder.vue'
+// ============================================================================
+// 设备管理
+// ============================================================================
+// 硬件尚未接入，校准与升级是**模拟**操作：界面走完整流程，数据库只记录
+// 结果状态（固件版本号、最后在线时间），不真的与设备通信。
+// 页面底部有明确标注，不伪装成真实操作。
+// ============================================================================
+import { computed, onMounted, reactive, ref } from 'vue'
+
+import { ElMessage, ElMessageBox } from 'element-plus'
+import type { FormInstance, FormItemRule } from 'element-plus'
+
+import { formatRelative } from '@/lib/format'
+import { useDeviceStore } from '@/stores/device'
+import { useUserStore } from '@/stores/user'
+import type { Device, DeviceStatus } from '@/types'
+
+const devices = useDeviceStore()
+const user = useUserStore()
+
+const STATUS_LABEL: Record<DeviceStatus, string> = {
+  online: '在线',
+  offline: '离线',
+  maintenance: '维护中',
+}
+
+const STATUS_TAG: Record<DeviceStatus, 'success' | 'info' | 'warning'> = {
+  online: 'success',
+  offline: 'info',
+  maintenance: 'warning',
+}
+
+/** 正在执行操作的设备 id —— 按行显示 loading，避免整表转圈 */
+const busyId = ref<string | null>(null)
+
+const onlineCount = computed(() => devices.onlineCount)
+
+// ---------------------------------------------------------------------------
+// 添加设备
+// ---------------------------------------------------------------------------
+const dialogVisible = ref(false)
+const submitting = ref(false)
+const formRef = ref<FormInstance>()
+
+const form = reactive({
+  serialNo: '',
+  model: 'FSIFSTS',
+})
+
+const serialRules: FormItemRule[] = [
+  { required: true, message: '请输入设备序列号', trigger: 'blur' },
+  {
+    pattern: /^[A-Za-z0-9-]{4,32}$/,
+    message: '序列号只能包含字母、数字和连字符，长度 4–32 位',
+    trigger: 'blur',
+  },
+]
+
+function openDialog() {
+  form.serialNo = ''
+  form.model = 'FSIFSTS'
+  dialogVisible.value = true
+  // 对话框渲染完再清校验状态，否则清的是上一次的实例
+  requestAnimationFrame(() => formRef.value?.clearValidate())
+}
+
+async function submit() {
+  if (!formRef.value) return
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
+
+  const ownerId = user.userId
+  if (!ownerId) {
+    ElMessage.error('未获取到当前用户身份，无法绑定设备')
+    return
+  }
+
+  submitting.value = true
+  try {
+    const result = await devices.addDevice(form.serialNo, ownerId, form.model)
+    if (result.ok) {
+      ElMessage.success(result.message)
+      dialogVisible.value = false
+    } else {
+      ElMessage.error(result.message)
+    }
+  } finally {
+    submitting.value = false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 行操作
+// ---------------------------------------------------------------------------
+/** 把 1.0.0 升到 1.1.0；解析不出来就退回一个默认版本 */
+function nextFirmware(current: string | null): string {
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(current ?? '')
+  if (!m) return '1.1.0'
+  return `${m[1]}.${Number(m[2]) + 1}.0`
+}
+
+/** 模拟一次耗时操作，让界面有真实的过程感 */
+function simulateDelay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function calibrate(row: Device) {
+  busyId.value = row.id
+  try {
+    await simulateDelay(1200)
+    const ok = await devices.touch(row.id)
+    ok
+      ? ElMessage.success(`「${row.serial_no}」校准完成，基线已重置`)
+      : ElMessage.error(devices.error ?? '校准失败')
+  } finally {
+    busyId.value = null
+  }
+}
+
+async function upgrade(row: Device) {
+  const target = nextFirmware(row.firmware)
+  try {
+    await ElMessageBox.confirm(
+      `将「${row.serial_no}」的固件从 ${row.firmware ?? '未知'} 升级到 ${target}？` +
+        '升级过程中请保持设备连接。',
+      '固件升级',
+      { confirmButtonText: '开始升级', cancelButtonText: '取消', type: 'info' },
+    )
+  } catch {
+    return // 用户取消
+  }
+
+  busyId.value = row.id
+  try {
+    // 模拟升级耗时。真实实现里这里应当是一个带进度回报的长连接，
+    // 而不是一个固定的等待
+    await simulateDelay(2500)
+    const ok = await devices.upgradeFirmware(row.id, target)
+    ok
+      ? ElMessage.success(`已升级到 ${target}`)
+      : ElMessage.error(devices.error ?? '升级失败')
+  } finally {
+    busyId.value = null
+  }
+}
+
+async function unbind(row: Device) {
+  try {
+    await ElMessageBox.confirm(
+      `解绑「${row.serial_no}」后，该设备将从列表中移除，` +
+        '历史训练记录会保留但不再关联到这台设备。',
+      '确认解绑',
+      { confirmButtonText: '解绑', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+
+  busyId.value = row.id
+  try {
+    const ok = await devices.unbind(row.id)
+    ok
+      ? ElMessage.success('已解绑。若需重新绑定，用同一序列号再添加一次即可。')
+      : ElMessage.error(devices.error ?? '解绑失败')
+  } finally {
+    busyId.value = null
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+onMounted(() => {
+  if (!devices.loaded) void devices.fetchAll()
+})
 </script>
 
 <template>
-  <PagePlaceholder
-    title="我的设备"
-    description="管理柔性传感器设备的绑定与状态。"
-    :todos="[
-      '设备列表：序列号、型号、在线状态、电量、最后在线时间',
-      '绑定新设备（按序列号）',
-      '解绑设备（注意：解绑后历史训练记录仍保留，device_id 置空）',
-      '设备固件版本显示',
-      '注意：未绑定设备目前对普通用户不可见，绑定流程需要单独的 RPC，见 RLS 迁移中的说明',
-    ]"
-  />
+  <div class="devices">
+    <!-- 概要 -->
+    <section class="summary">
+      <div class="summary__item">
+        <span class="summary__label">已绑定设备</span>
+        <p class="summary__value">{{ devices.devices.length }}</p>
+      </div>
+      <div class="summary__item">
+        <span class="summary__label">在线</span>
+        <p class="summary__value">{{ onlineCount }}</p>
+      </div>
+      <div class="summary__item">
+        <span class="summary__label">离线 / 维护</span>
+        <p class="summary__value">
+          {{ devices.devices.length - onlineCount }}
+        </p>
+      </div>
+    </section>
+
+    <!-- 表格 -->
+    <section class="panel">
+      <header class="panel__head">
+        <h2 class="panel__title">设备列表</h2>
+        <div class="panel__actions">
+          <el-button :loading="devices.loading" @click="devices.fetchAll()">
+            刷新
+          </el-button>
+          <el-button type="primary" @click="openDialog">添加设备</el-button>
+        </div>
+      </header>
+
+      <el-table
+        v-loading="devices.loading"
+        :data="devices.devices"
+        style="width: 100%"
+        empty-text="还没有绑定设备。点右上角「添加设备」输入序列号即可绑定。"
+      >
+        <el-table-column label="序列号" min-width="150">
+          <template #default="{ row }">
+            <span class="mono">{{ row.serial_no }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="model" label="型号" width="110" />
+
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="STATUS_TAG[row.status as DeviceStatus]" size="small">
+              {{ STATUS_LABEL[row.status as DeviceStatus] }}
+            </el-tag>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="电量" width="120">
+          <template #default="{ row }">
+            <div v-if="row.battery_pct != null" class="battery">
+              <div class="battery__track">
+                <div
+                  class="battery__fill"
+                  :class="{
+                    'battery__fill--low': row.battery_pct < 20,
+                    'battery__fill--mid':
+                      row.battery_pct >= 20 && row.battery_pct < 50,
+                  }"
+                  :style="{ width: `${row.battery_pct}%` }"
+                />
+              </div>
+              <span class="battery__text">{{ row.battery_pct }}%</span>
+            </div>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="固件" width="100">
+          <template #default="{ row }">
+            <span class="mono">{{ row.firmware ?? '—' }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="最后在线" min-width="120">
+          <template #default="{ row }">
+            <span class="muted">{{ formatRelative(row.last_seen_at) }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="操作" width="220" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              size="small"
+              :loading="busyId === row.id"
+              @click="calibrate(row)"
+            >
+              校准
+            </el-button>
+            <el-button
+              size="small"
+              :disabled="busyId === row.id"
+              @click="upgrade(row)"
+            >
+              升级
+            </el-button>
+            <el-button
+              size="small"
+              type="danger"
+              plain
+              :disabled="busyId === row.id"
+              @click="unbind(row)"
+            >
+              解绑
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </section>
+
+    <p class="footnote">
+      硬件尚未接入，<strong>校准</strong>与<strong>升级</strong>为模拟操作：
+      界面走完整流程，数据库只记录结果状态（固件版本号、最后在线时间），
+      不真的与设备通信。解绑是真实操作 —— 会把设备的归属置空，
+      之后可用同一序列号重新添加。
+    </p>
+
+    <!-- 添加设备对话框 -->
+    <el-dialog
+      v-model="dialogVisible"
+      title="添加设备"
+      width="440px"
+      :close-on-click-modal="false"
+    >
+      <el-form
+        ref="formRef"
+        :model="form"
+        label-position="top"
+        @submit.prevent="submit"
+      >
+        <el-form-item label="设备序列号" prop="serialNo" :rules="serialRules">
+          <el-input
+            v-model="form.serialNo"
+            placeholder="如 FSIFSTS-2026-0001"
+            :disabled="submitting"
+            @keyup.enter="submit"
+          />
+          <p class="field-hint">
+            序列号印在设备背面。若该设备此前被解绑，用同一序列号即可重新认领。
+          </p>
+        </el-form-item>
+
+        <el-form-item label="型号" prop="model">
+          <el-input v-model="form.model" disabled />
+          <p class="field-hint">当前仅支持自研型号 FSIFSTS。</p>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button :disabled="submitting" @click="dialogVisible = false">
+          取消
+        </el-button>
+        <el-button type="primary" :loading="submitting" @click="submit">
+          绑定
+        </el-button>
+      </template>
+    </el-dialog>
+  </div>
 </template>
+
+<style scoped>
+.devices {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ---------- 概要 ---------- */
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.summary__item {
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 10px;
+}
+
+.summary__label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.summary__value {
+  margin: 6px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #303133;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 表格面板 ---------- */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 10px;
+}
+
+.panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.panel__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.panel__actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- 单元格 ---------- */
+.mono {
+  font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+  font-size: 13px;
+}
+
+.muted {
+  color: #a8abb2;
+  font-size: 13px;
+}
+
+.battery {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.battery__track {
+  flex: 1;
+  height: 6px;
+  min-width: 40px;
+  border-radius: 3px;
+  background: #f2f3f5;
+  overflow: hidden;
+}
+
+.battery__fill {
+  height: 100%;
+  border-radius: 3px;
+  background: #67c23a;
+  transition: width 0.3s;
+}
+
+.battery__fill--mid {
+  background: #e6a23c;
+}
+
+.battery__fill--low {
+  background: #f56c6c;
+}
+
+.battery__text {
+  font-size: 12px;
+  color: #606266;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 其他 ---------- */
+.footnote {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #a8abb2;
+}
+
+.field-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #909399;
+}
+</style>

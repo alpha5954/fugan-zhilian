@@ -7,7 +7,12 @@ import { computed, ref } from 'vue'
 
 import { toMessage } from '@/lib/errors'
 import { supabase } from '@/lib/supabase'
-import type { Device, DeviceInsert, DeviceUpdate } from '@/types'
+import type {
+  ClaimDeviceResult,
+  Device,
+  DeviceInsert,
+  DeviceUpdate,
+} from '@/types'
 
 export const useDeviceStore = defineStore('device', () => {
   const devices = ref<Device[]>([])
@@ -66,6 +71,106 @@ export const useDeviceStore = defineStore('device', () => {
     const created = data?.[0] ?? null
     if (created) devices.value = [created, ...devices.value]
     return created
+  }
+
+  /**
+   * 添加设备：先尝试认领系统中已存在的无主设备，查无此序列号才登记新设备。
+   *
+   * 两步合成一个对外动作 —— 用户不关心这台设备是"别人解绑回收的"还是
+   * "刚出厂的"，他只知道自己填了个序列号、然后就该绑上。
+   *
+   * 认领走的是 claim_device() RPC 而不是直接 UPDATE：未绑定设备对普通用户
+   * 不可见（RLS 过滤 owner_id is null），直接 UPDATE 根本够不到那一行。
+   */
+  async function addDevice(
+    serialNo: string,
+    ownerId: string,
+    model = 'FSIFSTS',
+  ): Promise<{ ok: boolean; message: string }> {
+    const serial = serialNo.trim()
+    if (!serial) return { ok: false, message: '请填写设备序列号' }
+
+    error.value = null
+
+    // 1. 先试认领
+    const { data, error: rpcErr } = await supabase.rpc('claim_device', {
+      p_serial: serial,
+    })
+
+    if (rpcErr) {
+      error.value = toMessage(rpcErr, '绑定设备失败')
+      return { ok: false, message: error.value }
+    }
+
+    const result = data as ClaimDeviceResult | null
+
+    if (result?.ok) {
+      // 认领成功时本地列表里还没有这台设备，重新拉一次
+      await fetchAll()
+      return { ok: true, message: result.message }
+    }
+
+    // 2. 系统里没有这个序列号 → 当作新设备登记
+    if (result?.reason === 'not_found') {
+      const created = await create({
+        serial_no: serial,
+        owner_id: ownerId,
+        model,
+        status: 'online',
+        battery_pct: 100,
+        firmware: '1.0.0',
+        last_seen_at: new Date().toISOString(),
+      })
+      return created
+        ? { ok: true, message: '已登记新设备并完成绑定' }
+        : { ok: false, message: error.value ?? '登记设备失败' }
+    }
+
+    return { ok: false, message: result?.message ?? '绑定失败' }
+  }
+
+  /**
+   * 解绑设备。
+   *
+   * 置 owner_id 为 null 而不是删行 —— 历史训练记录通过 device_id 关联到
+   * 设备，删行会切断这层关联。代价是设备变回无主状态，需要时可以用
+   * addDevice() 重新认领。
+   */
+  async function unbind(id: string): Promise<boolean> {
+    error.value = null
+
+    const { data, error: err } = await supabase
+      .from('devices')
+      .update({ owner_id: null })
+      .eq('id', id)
+      .select('id')
+
+    if (err) {
+      error.value = toMessage(err, '解绑失败')
+      return false
+    }
+    if (!data?.length) {
+      error.value = '解绑未生效（无权限或设备不存在）'
+      return false
+    }
+
+    // 解绑后该设备立即对当前用户不可见，本地列表必须一并移除 ——
+    // 留着会变成一条再也操作不了的僵尸记录
+    devices.value = devices.value.filter((d) => d.id !== id)
+    return true
+  }
+
+  /** 固件升级（模拟）：写入新版本号，代表设备已完成升级 */
+  async function upgradeFirmware(id: string, version: string): Promise<boolean> {
+    return update(id, {
+      firmware: version,
+      last_seen_at: new Date().toISOString(),
+    })
+  }
+
+  /** 校准（模拟）：刷新最后在线时间，代表设备响应了校准指令 */
+  async function touch(id: string): Promise<boolean> {
+    return update(id, { last_seen_at: new Date().toISOString() })
   }
 
   async function update(id: string, patch: DeviceUpdate): Promise<boolean> {
@@ -128,6 +233,10 @@ export const useDeviceStore = defineStore('device', () => {
     byId,
     fetchAll,
     create,
+    addDevice,
+    unbind,
+    upgradeFirmware,
+    touch,
     update,
     remove,
     reset,

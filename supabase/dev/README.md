@@ -56,6 +56,8 @@ docker exec fugan-pgtest psql -U postgres -d postgres \
 | `e2e_auth.py` | 对**真实 Supabase 项目**跑认证链路：注册 → 触发器建档 → 角色白名单 → 登录 → RLS 隔离。18 项断言 |
 | `e2e_dashboard.py` | 插数据跑一遍首页用的查询，重点验「今日训练次数」的**时区边界**。19 项断言，跑完自动清理自己插入的行 |
 | `e2e_assessment.py` | 康复评估页的入库链路：jsonb 波形往返、五条 check 约束、rms_mv 精度、跨用户写入被拒。17 项断言，含 7 项「这些失败才是好事」的负面用例 |
+| `device_claim_test.sql` | 设备认领 RPC 的本地行为测试。重点验「不许抢别人的设备」——这是 security definer 函数最危险的一处 |
+| `e2e_devices.py` | 设备管理页的链路：绑定 → 解绑 → 重新认领的闭环，以及认领 RPC 的全部边界 |
 
 ## 两套测试的分工
 
@@ -68,7 +70,23 @@ docker exec fugan-pgtest psql -U postgres -d postgres \
 
 本地那套更快更干净，日常改表结构用它；涉及注册/登录实际行为的，只有真实项目能验。
 
-### 跑 e2e_auth.py 的前置条件
+## 为什么设备认领要单独写个 RPC
+
+设备的 RLS 策略是"只能看见自己的设备"（`can_access_patient(owner_id)`，对 null 返回 false）。但解绑时 `owner_id` 被置为 null 以保留历史训练的关联——于是**未绑定设备对任何普通用户都不可见**，解绑后就再也绑不回来了：SELECT 和 UPDATE 都够不到那一行，序列号又受唯一约束保护、不能重复插入。
+
+解法是 `claim_device()` 这个 security definer 函数：它以属主身份执行、绕过 RLS，但内部自己做完整校验，只放行"把无主设备绑到自己名下"这一种操作。
+
+这类函数是权限体系里最危险的一环——**写错一行就能让任何人把别人的设备夺过去**。所以它有独立的测试文件 `device_claim_test.sql`，逐条覆盖每个分支，其中最关键的是：
+
+```sql
+select public.test_claim('A 试图认领 B 的设备（必须失败）', 'DEV-B-001', false, 'taken');
+```
+
+### 已知的信息泄露
+
+`claim_device` 会区分"设备不存在"与"设备已被他人绑定"，等于允许已登录用户探测某个序列号是否存在于系统中。当前可接受（序列号不是敏感信息），但如果将来序列号变得可预测、或设备量级很大，应改为统一返回"无法绑定"。
+
+## 跑端到端脚本的前置条件
 
 项目的 **`Confirm email` 必须关闭**，否则注册不返回 session，第一步就失败：
 
