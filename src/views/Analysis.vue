@@ -80,8 +80,9 @@ async function load() {
   }
 }
 
-// 切换查看对象后重新拉取
-watch(() => care.activePatientId, load)
+// 切换查看对象后重新拉取。监听 viewingPatientId 而非 activePatientId ——
+// 后者在登录完成时也会变，会和 onMounted 的首次加载重复
+watch(() => care.viewingPatientId, load)
 
 function onFilterChange() {
   void load()

@@ -134,9 +134,13 @@ async function reload() {
   }
 }
 
-// 切换查看对象后要重新拉数据。用 watch 而不是在 Care 页面里跳转后再拉 ——
-// 用户也可能在顶部提示条上点「返回我自己」，同样需要刷新
-watch(() => care.activePatientId, reload)
+// 切换查看对象后要重新拉数据。
+//
+// ⚠️ 监听的是 viewingPatientId（用户主动切换）而不是 activePatientId。
+//    activePatientId 在登录完成时也会从 undefined 变成自己的 id，
+//    监听它会让首次加载多发一轮请求 —— 四个接口各发两遍。
+//    用户点顶部提示条的「返回我自己」同样会改 viewingPatientId，所以覆盖得到。
+watch(() => care.viewingPatientId, reload)
 
 /**
  * 任一 store 出错就展示出来。

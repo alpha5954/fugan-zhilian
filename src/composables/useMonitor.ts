@@ -110,6 +110,16 @@ export function useMonitor() {
       position: 'bottom-right',
     })
 
+    // ⚠️ 归属人固定为当前登录用户，不能用"正在查看的对象"。
+    //
+    //    RLS 的 alerts_insert 策略是 `with check (patient_id = auth.uid())` ——
+    //    家属**无权**为监护对象插入预警。真按查看对象写，插入会被静默拒绝
+    //    （只有 INSERT 违反 WITH CHECK 才报错，这里是策略直接不允许），
+    //    用户会在毫不知情的情况下丢掉预警记录。
+    //
+    //    语义上说得通：实时监测用的是**本机用户自己佩戴的传感器**，
+    //    产生的预警自然归自己。要支持"代患者记录"，需要在数据库侧
+    //    开放家属对监护对象的 insert 权限，那是一个独立的权限决策。
     const patientId = user.userId
     if (!patientId) return
 

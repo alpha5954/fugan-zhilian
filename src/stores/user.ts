@@ -65,6 +65,10 @@ export const useUserStore = defineStore('user', () => {
       return
     }
 
+    // 先清空上一次的错误。这个方法在每次 auth 状态变化后都会被调用，
+    // 一次瞬时失败留下的错误会一直挂在界面上 —— 与其他方法保持一致
+    error.value = null
+
     const { data, error: err } = await supabase
       .from('profiles')
       .select('*')
@@ -185,6 +189,10 @@ export const useUserStore = defineStore('user', () => {
   }
 
   async function signOut(): Promise<void> {
+    // 与其他方法保持一致。退出失败本身值得让用户看到，但下次再点一次
+    // 就该把这条旧错误清掉，而不是叠着显示
+    error.value = null
+
     const { error: err } = await supabase.auth.signOut()
     if (err) {
       error.value = toMessage(err, '退出登录失败')
@@ -211,6 +219,9 @@ export const useUserStore = defineStore('user', () => {
     return initPromise
   }
 
+  // 这个方法刻意不在这里清空 error：它由 init() 保证整个会话只执行一次
+  // （initPromise 幂等），所以不存在"上一次的错误残留"这一说。清空反而会
+  // 把 getSession 失败的原因盖掉，让用户不知道白屏是为什么。
   async function doInit(): Promise<void> {
     loading.value = true
     try {

@@ -102,6 +102,10 @@ export const useSessionStore = defineStore('session', () => {
    * 「今日」会从前一天算起。
    */
   async function fetchTodayCount(patientId?: string): Promise<void> {
+    // 与 fetchUnacknowledgedCount 同理：不先清空的话，一次瞬时失败留下的
+    // 错误会一直挂在界面上，后续成功也不会自动消失
+    error.value = null
+
     let query = supabase
       .from('rehab_sessions')
       .select('*', { count: 'exact', head: true })

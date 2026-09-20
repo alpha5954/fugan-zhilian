@@ -101,6 +101,11 @@ export const useAlertStore = defineStore('alert', () => {
    * 当前用户可见的那些预警。
    */
   async function fetchUnacknowledgedCount(patientId?: string): Promise<void> {
+    // 必须先把上一次的错误清掉。否则一次瞬时网络抖动（国内访问 Supabase
+    // 很常见）留下的错误会**一直挂在界面上** —— 后续请求即使全部成功，
+    // 因为没有清空，用户看到的仍是那条旧错误，只能整页刷新才能消掉。
+    error.value = null
+
     let query = supabase
       .from('alerts')
       .select('*', { count: 'exact', head: true })

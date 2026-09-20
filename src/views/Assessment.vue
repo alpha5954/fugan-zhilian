@@ -208,8 +208,9 @@ onMounted(() => {
   if (!devices.loaded) void devices.fetchAll({ ownerId: user.userId ?? undefined })
 })
 
-// 切换查看对象后重新拉历史，否则 ROM 对比会拿别人的上次记录来比
-watch(() => care.activePatientId, loadHistory)
+// 切换查看对象后重新拉历史，否则 ROM 对比会拿别人的上次记录来比。
+// 监听 viewingPatientId 而非 activePatientId，理由同 Dashboard
+watch(() => care.viewingPatientId, loadHistory)
 </script>
 
 <template>
