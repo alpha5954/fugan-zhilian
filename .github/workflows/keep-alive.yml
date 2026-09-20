@@ -10,9 +10,14 @@ name: Supabase 保活心跳
 #   - anon 角色有 EXECUTE 权限，无需表的 UPDATE 权限
 # 这里补的是"调用方"。
 #
-# 关于密钥：SUPABASE_ANON_KEY 是公开密钥——它会打包进前端 JS，任何人
-# 打开浏览器都能看到，本身不构成权限边界（真正的边界是 RLS）。
+# 关于密钥：anon key 是公开密钥——它会打包进前端 JS，任何人打开浏览器
+# 都能看到，本身不构成权限边界（真正的边界是 RLS）。
 # 放在 GitHub Secrets 里主要是避免在公开仓库中暴露项目地址、招来扫描流量。
+#
+# ⚠️ secret 名与 deploy.yml 用的是**同一对**（VITE_ 前缀）。
+#    这个名字来自 Vite 的约定：只有 VITE_ 前缀的变量才会被注入前端产物，
+#    所以部署工作流必须用这个名字。本工作流其实不走 Vite，但共用同一对
+#    secret 可以少配两个、也避免"改了一处忘了另一处"。
 # ============================================================================
 
 on:
@@ -31,12 +36,12 @@ jobs:
     steps:
       - name: 校验 secrets 已配置
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: |
           missing=""
-          [ -z "$SUPABASE_URL" ]      && missing="$missing SUPABASE_URL"
-          [ -z "$SUPABASE_ANON_KEY" ] && missing="$missing SUPABASE_ANON_KEY"
+          [ -z "$VITE_SUPABASE_URL" ]      && missing="$missing VITE_SUPABASE_URL"
+          [ -z "$VITE_SUPABASE_ANON_KEY" ] && missing="$missing VITE_SUPABASE_ANON_KEY"
           if [ -n "$missing" ]; then
             echo "::error::缺少仓库 secret:$missing"
             echo "前往 Settings → Secrets and variables → Actions → New repository secret 添加"
@@ -46,16 +51,16 @@ jobs:
 
       - name: 调用 ping_keepalive
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: |
           # --fail-with-body：HTTP >= 400 时让 curl 以非零码退出，同时保留
           # 响应体，便于从日志直接看到 Supabase 返回的错误原因
           resp=$(curl -sS --fail-with-body --max-time 30 \
                       --retry 3 --retry-delay 5 \
-                 -X POST "${SUPABASE_URL%/}/rest/v1/rpc/ping_keepalive" \
-                 -H "apikey: ${SUPABASE_ANON_KEY}" \
-                 -H "Authorization: Bearer ${SUPABASE_ANON_KEY}" \
+                 -X POST "${VITE_SUPABASE_URL%/}/rest/v1/rpc/ping_keepalive" \
+                 -H "apikey: ${VITE_SUPABASE_ANON_KEY}" \
+                 -H "Authorization: Bearer ${VITE_SUPABASE_ANON_KEY}" \
                  -H "Content-Type: application/json" \
                  -d '{}')
 
