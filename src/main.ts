@@ -2,6 +2,7 @@ import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 
 import App from './App.vue'
+import { installGlobalErrorHandlers } from './lib/errorHandlers'
 import router from './router'
 
 // 样式导入顺序要紧：先 Element Plus 再自己的全局样式，
@@ -18,5 +19,9 @@ const app = createApp(App)
 
 app.use(createPinia())
 app.use(router)
+
+// 全局错误兜底：渲染期的错误由 ErrorBoundary 接住，组件外的同步异常与
+// 未处理的 Promise 拒绝由这里接住。两者都是"出了事别让用户面对一片白"。
+installGlobalErrorHandlers(app)
 
 app.mount('#app')

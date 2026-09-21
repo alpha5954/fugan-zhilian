@@ -5,6 +5,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
+import ErrorBoundary from '@/components/ErrorBoundary.vue'
 import { useAlertStore } from '@/stores/alert'
 import { useCareStore } from '@/stores/care'
 import { useUserStore } from '@/stores/user'
@@ -182,7 +183,12 @@ async function handleCommand(command: string) {
         </el-button>
       </div>
 
-      <RouterView />
+      <!-- 套错误边界：某个页面渲染期抛异常时，Vue 会卸载整棵子树，
+           用户会看到一片白且点不动。边界把它换成一个能看懂的提示
+           和"重新加载"入口 -->
+      <ErrorBoundary>
+        <RouterView />
+      </ErrorBoundary>
     </main>
   </div>
 </template>

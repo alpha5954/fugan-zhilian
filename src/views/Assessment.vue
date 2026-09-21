@@ -13,6 +13,7 @@ import { ElMessage } from 'element-plus'
 
 import BarChart from '@/components/BarChart.vue'
 import type { BarSeries } from '@/components/BarChart.vue'
+import PhaseChart from '@/components/PhaseChart.vue'
 import {
   REHAB_EXERCISES,
   generateSession,
@@ -423,6 +424,86 @@ watch(() => care.viewingPatientId, loadHistory)
         </article>
       </section>
 
+      <!-- 肌电-运动学融合（命题答题要求点名的第三项能力） -->
+      <section class="panel">
+        <header class="panel__head">
+          <h3 class="panel__title">肌电-关节角度相位分析</h3>
+          <span class="panel__unit">运动学数据融合</span>
+        </header>
+
+        <template v-if="result && result.emgAngle.applicable">
+          <p class="panel__desc">
+            把一次屈伸动作里每个角度上的肌电强度按<strong>相位</strong>分开画：
+            角度增大的向心期与角度减小的离心期各成一条曲线。两条曲线的
+            <strong>高低差</strong>就是发力相位是否正确的直接证据 ——
+            肌电峰值若落在离心期，说明存在代偿。
+          </p>
+
+          <div class="phase-legend">
+            <span class="phase-legend__item">
+              <span class="phase-legend__dot" style="background: #e6a23c" />
+              向心期（角度增大）
+            </span>
+            <span class="phase-legend__item">
+              <span class="phase-legend__dot" style="background: #409eff" />
+              离心期（角度减小）
+            </span>
+          </div>
+
+          <PhaseChart
+            :concentric="result.emgAngle.concentric"
+            :eccentric="result.emgAngle.eccentric"
+            :peak-angle="result.emgAngle.peakAngle"
+            :height="260"
+          />
+
+          <div class="phase-metrics">
+            <div class="phase-metric">
+              <span class="phase-metric__label">向心期肌电 RMS</span>
+              <p class="phase-metric__value">
+                {{ result.emgAngle.concentricRms.toFixed(4)
+                }}<span class="phase-metric__unit">mV</span>
+              </p>
+            </div>
+            <div class="phase-metric">
+              <span class="phase-metric__label">离心期肌电 RMS</span>
+              <p class="phase-metric__value">
+                {{ result.emgAngle.eccentricRms.toFixed(4)
+                }}<span class="phase-metric__unit">mV</span>
+              </p>
+            </div>
+            <div class="phase-metric phase-metric--accent">
+              <span class="phase-metric__label">向心／离心 比值</span>
+              <p class="phase-metric__value">
+                {{ result.emgAngle.ratio.toFixed(2) }}
+              </p>
+            </div>
+            <div class="phase-metric">
+              <span class="phase-metric__label">肌电峰值角度</span>
+              <p class="phase-metric__value">
+                {{ result.emgAngle.peakAngle
+                }}<span class="phase-metric__unit">°</span>
+              </p>
+            </div>
+          </div>
+
+          <div
+            class="phase-reading"
+            :class="`phase-reading--${result.emgAngle.level}`"
+          >
+            {{ result.emgAngle.interpretation }}
+          </div>
+        </template>
+
+        <!-- 静力动作做相位分析会得出无意义的比值，此时明确说明不适用，
+             而不是硬画一张几乎重合的曲线 -->
+        <el-empty
+          v-else-if="result"
+          :description="result.emgAngle.reason ?? '本次记录不适用相位分析'"
+          :image-size="70"
+        />
+      </section>
+
       <!-- 建议 -->
       <section class="panel">
         <h2 class="panel__title">评估建议</h2>
@@ -670,6 +751,107 @@ watch(() => care.viewingPatientId, loadHistory)
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 16px;
+}
+
+/* ---------- 肌电-角度相位分析 ---------- */
+.panel__desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.75;
+  color: #606266;
+}
+
+.panel__desc strong {
+  color: #303133;
+}
+
+.phase-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.phase-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.phase-legend__dot {
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.phase-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.phase-metric {
+  padding: 12px 14px;
+  background: #fafafa;
+  border: 1px solid #f2f3f5;
+  border-radius: 8px;
+}
+
+/* 比值是这一节最核心的数字，单独高亮 */
+.phase-metric--accent {
+  border-color: #f5dab1;
+  background: #fdf8f0;
+}
+
+.phase-metric--accent .phase-metric__value {
+  color: #a06800;
+}
+
+.phase-metric__label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.phase-metric__value {
+  margin: 4px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: #303133;
+  font-variant-numeric: tabular-nums;
+}
+
+.phase-metric__unit {
+  margin-left: 3px;
+  font-size: 11px;
+  font-weight: 400;
+  color: #909399;
+}
+
+.phase-reading {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border-left: 3px solid #c0c4cc;
+  background: #fafafa;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #606266;
+}
+
+.phase-reading--good {
+  border-left-color: #67c23a;
+  background: #f4faf0;
+}
+
+.phase-reading--info {
+  border-left-color: #409eff;
+  background: #f2f8ff;
+}
+
+.phase-reading--warn {
+  border-left-color: #e6a23c;
+  background: #fdf8f0;
 }
 
 /* ---------- 建议 ---------- */

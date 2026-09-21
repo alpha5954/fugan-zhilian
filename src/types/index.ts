@@ -75,6 +75,14 @@ export interface Waveform {
   r_ohm: number[]
   /** 局部温度（摄氏度），可选 */
   temp_c?: number[]
+  /**
+   * 表面肌电（mV），可选。
+   *
+   * 与 t_ms 等长，用于做「关节角度与肌电的关联性分析」—— 那是命题答题
+   * 要求里点名的一项。不存下来的话，历史会话就做不了这项分析。
+   * 早期记录没有这个键，读取方需按可选处理。
+   */
+  emg_mv?: number[]
 }
 
 /** Supabase 返回的统计结果（`.select('...', { count: 'exact' })` 时使用） */

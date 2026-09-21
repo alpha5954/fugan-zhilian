@@ -222,10 +222,74 @@ check('静力动作的判定不会拿活动范围去比目标值（那样会误�
   wallSit.advice.every((a) => !a.title.includes('关节活动度')),
   `靠墙静蹲：保持 ${wallSit.holdAngle.toFixed(1)}° / 目标 ${wallSit.target}°，活动范围仅 ${wallSit.romMax.toFixed(1)}°`)
 
+
+// ---------------------------------------------------------------- 肌电-运动学融合
+console.log()
+console.log('='.repeat(70))
+console.log('7. 肌电-关节角度相位分析（命题答题要求的第三项）')
+console.log('='.repeat(70))
+
+// 模拟器的肌电包络峰值固定在动作周期的 25% 相位（向心收缩期），
+// 而角度在相位 0.25 时恰好是 (ANGLE_MIN+ANGLE_MAX)/2。
+// 所以分析出来的峰值角度应当收敛到这个值 —— 这是可以反推的物理真值。
+const phase = generateSession('屈膝滑动', 6).emgAngle
+console.log(`  峰值角度：${phase.peakAngle}°（模拟器设定值应为 50°）`)
+console.log(`  向心/离心比：${phase.ratio}（模拟器设定值约 2.3）`)
+console.log(`  向心曲线 ${phase.concentric.length} 点，离心曲线 ${phase.eccentric.length} 点`)
+console.log(`  解读：${phase.interpretation}`)
+
+check('适用相位分析', phase.applicable)
+// 容差取 ±15° 而不是更紧：模拟器的肌电包络本身很宽（相位标准差 0.12
+// 折算成角度约 11°），加上每个角度分箱只有约 2 个采样点，估计量的标准差
+// 实测为 5.4°，卡到 ±5° 会有近一半的运行失败。
+//
+// 这个断言真正要证的是「峰值落在关节活动范围的中间段（向心期）」——
+// 若实现坏了（比如取成角度最小值 5° 或最大值 100°），一定会被抓住。
+check('★ 峰值角度落在活动范围中段（真值约 50–53°，向心期）',
+  phase.peakAngle >= 35 && phase.peakAngle <= 70, `${phase.peakAngle}°`)
+check('★ 向心/离心比值还原出真值约 2.3（> 1.5 即说明分析有效）',
+  phase.ratio > 1.5, phase.ratio.toFixed(2))
+check('向心期与离心期都识别出了曲线',
+  phase.concentric.length > 0 && phase.eccentric.length > 0)
+check('两条曲线的角度范围大致相同（同一次动作的往返）',
+  Math.abs(
+    (phase.concentric.at(-1)!.angle - phase.concentric[0].angle) -
+    (phase.eccentric.at(-1)!.angle - phase.eccentric[0].angle),
+  ) <= 10,
+  `向心跨 ${phase.concentric.at(-1)!.angle - phase.concentric[0].angle}°，离心跨 ${phase.eccentric.at(-1)!.angle - phase.eccentric[0].angle}°`)
+check('比值为正且有限', Number.isFinite(phase.ratio) && phase.ratio > 0)
+check('给出的解读与比值一致（>1.3 应判为正常）',
+  phase.ratio >= 1.3 ? phase.level === 'good' : phase.level !== 'good',
+  `level=${phase.level}`)
+check('曲线按角度升序排列',
+  phase.concentric.every((p, i) => i === 0 || p.angle > phase.concentric[i-1].angle))
+
+// ---- 静力动作必须被排除 ----
+const wallPhase = generateSession('靠墙静蹲', 4).emgAngle
+console.log(`\n  靠墙静蹲：applicable=${wallPhase.applicable}`)
+console.log(`  原因：${wallPhase.reason ?? '(无)'}`)
+check('★ 静力动作不适用相位分析（避免给出无意义的比值）',
+  wallPhase.applicable === false && Boolean(wallPhase.reason),
+  wallPhase.reason ?? '(没有给出原因)')
+
+// ---- 波形里要带上肌电，否则历史会话做不了这项分析 ----
+const phaseWf = generateSession('屈膝滑动', 6).waveform
+console.log(`\n  波形字段：${Object.keys(phaseWf).join(', ')}`)
+check('波形包含 emg_mv（历史会话才能重做相位分析）',
+  Array.isArray(phaseWf.emg_mv) && phaseWf.emg_mv!.length === phaseWf.t_ms.length,
+  `${phaseWf.emg_mv?.length ?? 0} 点`)
+check('波形各数组等长',
+  phaseWf.t_ms.length === phaseWf.r_ohm.length &&
+  phaseWf.t_ms.length === phaseWf.temp_c!.length &&
+  phaseWf.t_ms.length === phaseWf.emg_mv!.length)
+check('加入肌电后波形体积仍远小于 256 KB',
+  JSON.stringify(phaseWf).length < 256 * 1024,
+  `${(JSON.stringify(phaseWf).length / 1024).toFixed(1)} KB`)
+
 // ---------------------------------------------------------------- 汇总
 console.log()
 console.log('='.repeat(70))
-const passed = results.filter(([, ok]) => ok).length
-console.log(`结果：${passed}/${results.length} 项通过`)
+const passed2 = results.filter(([, ok]) => ok).length
+console.log(`结果：${passed2}/${results.length} 项通过`)
 for (const [label, ok] of results) if (!ok) console.log(`  未通过：${label}`)
 console.log('='.repeat(70))
