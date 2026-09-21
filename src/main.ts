@@ -11,7 +11,6 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import { installGlobalErrorHandlers } from './lib/errorHandlers'
 import router from './router'
-import { applyViewMode, readProMode } from './stores/prefs'
 
 // ---------------------------------------------------------------------------
 // 样式导入顺序**不能改**，后面的覆盖前面的：
@@ -31,12 +30,6 @@ import { applyViewMode, readProMode } from './stores/prefs'
 import './styles/tokens.css'
 import './styles/element.css'
 import './style.css'
-
-// 在挂载**之前**把家属/专业模式写到 <html> 上。
-//
-// tokens.css 里靠 html[data-view='family'] 整组换字号与控件高度，
-// 晚一步的话页面会先用紧凑字号画一帧再跳成大字，肉眼能看到一次抖动。
-applyViewMode(readProMode())
 
 const app = createApp(App)
 

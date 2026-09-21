@@ -13,21 +13,16 @@ import { ElMessage } from 'element-plus'
 
 import BarChart from '@/components/BarChart.vue'
 import type { BarSeries } from '@/components/BarChart.vue'
-import ConclusionCard from '@/components/ConclusionCard.vue'
-import FoldToggle from '@/components/FoldToggle.vue'
 import PhaseChart from '@/components/PhaseChart.vue'
 import {
   REHAB_EXERCISES,
   generateSession,
-  metricLabel,
   type ExerciseName,
   type SessionResult,
 } from '@/lib/assessment'
 import { formatDuration } from '@/lib/format'
-import type { RiskBand } from '@/lib/insight'
 import { useCareStore } from '@/stores/care'
 import { useDeviceStore } from '@/stores/device'
-import { usePrefsStore } from '@/stores/prefs'
 import { useSessionStore } from '@/stores/session'
 import { useUserStore } from '@/stores/user'
 import type { JointName, RehabSessionInsert } from '@/types'
@@ -37,7 +32,6 @@ const user = useUserStore()
 const care = useCareStore()
 const sessions = useSessionStore()
 const devices = useDeviceStore()
-const prefs = usePrefsStore()
 
 // ---------------------------------------------------------------------------
 // 表单
@@ -135,49 +129,6 @@ const romMarkLines = computed(() => {
 
 /** 静力动作的活动度图只是参考，标题要说明 */
 const isStaticExercise = computed(() => result.value?.metric === 'hold')
-
-// ---------------------------------------------------------------------------
-// 家属模式：本次结论
-// ---------------------------------------------------------------------------
-// 这一页对家属只有一个问题：这次做得怎么样。
-// 识别置信度、肌电 RMS、相位环路、各轮次柱状图全部收进折叠区。
-
-/** 家属模式下技术细节是否展开。默认收起 */
-const techOpen = ref(false)
-
-/**
- * 本次训练的达标情况。
- *
- * ⚠️ 达标判定按动作**自己的**指标：动态动作看关节活动范围，
- *    静力动作看保持角度。两者不是同一个量，混用会得出完全相反的结论
- *    （靠墙静蹲的活动范围本来就只有几度）。这一层区分在 assessment.ts
- *    的 AssessMetric 里做完了，这里只负责翻成一句话。
- */
-const outcome = computed(() => {
-  const r = result.value
-  if (!r) return null
-
-  const ratio = r.target > 0 ? r.metricValue / r.target : 1
-  const band: RiskBand = ratio >= 1 ? 'green' : ratio >= 0.85 ? 'yellow' : 'red'
-
-  return {
-    band,
-    ratio,
-    reached: ratio >= 1,
-    label: metricLabel(r.metric),
-    value: r.metricValue,
-    target: r.target,
-  }
-})
-
-const outcomeHeadline = computed(() => {
-  const o = outcome.value
-  if (!o) return ''
-  const pct = Math.round(o.ratio * 100)
-  if (o.reached) return `本次训练达标，${o.label}达到康复目标`
-  if (o.band === 'yellow') return `接近达标，${o.label}已完成 ${pct}%`
-  return `本次还未达标，${o.label}完成 ${pct}%`
-})
 
 /** 四类置信度，降序排列 */
 const confidenceList = computed(() => {
@@ -354,27 +305,6 @@ watch(() => care.viewingPatientId, loadHistory)
 
     <!-- ================= 右栏：结果 ================= -->
     <div class="assess__main">
-      <!-- ---------- 家属模式：本次结论 ----------
-           家属打开这一页只想知道"这次做得怎么样"。
-           识别置信度、肌电 RMS、相位环路、各轮次柱状图全部收进下面的折叠区 -->
-      <ConclusionCard
-        v-if="!prefs.proMode && outcome"
-        :band="outcome.band"
-        :headline="outcomeHeadline"
-        :detail="`${outcome.label} ${outcome.value.toFixed(1)}° ／ 康复目标 ${outcome.target}°`"
-      />
-
-      <FoldToggle
-        v-if="!prefs.proMode"
-        :open="techOpen"
-        label="查看技术细节（识别置信度、肌电、图表）"
-        open-label="收起技术细节"
-        @toggle="techOpen = !techOpen"
-      />
-
-      <!-- 折叠区。下面这段的缩进保持原样没跟着加一级 —— 纯缩进改动
-           会把这次的真实改动淹掉，Vue 也不关心缩进 -->
-      <template v-if="prefs.proMode || techOpen">
       <!-- 识别结果 -->
       <section class="panel">
         <h2 class="panel__title">动作识别结果</h2>
@@ -574,10 +504,8 @@ watch(() => care.viewingPatientId, loadHistory)
           :image-size="70"
         />
       </section>
-      </template>
 
-      <!-- 建议。两种模式都显示 —— 它本来就是给家属看的话，
-           不是技术细节（detail 里写的是"请缩短单次时长"这类可执行的动作） -->
+      <!-- 建议 -->
       <section class="panel">
         <h2 class="panel__title">评估建议</h2>
 

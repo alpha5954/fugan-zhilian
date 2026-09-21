@@ -9,8 +9,6 @@ import { computed, onMounted, ref, watch } from 'vue'
 
 import BarChart from '@/components/BarChart.vue'
 import type { BarSeries } from '@/components/BarChart.vue'
-import ConclusionCard from '@/components/ConclusionCard.vue'
-import FoldToggle from '@/components/FoldToggle.vue'
 import PieChart from '@/components/PieChart.vue'
 import SignalChart from '@/components/SignalChart.vue'
 import type { ChartSeries } from '@/components/SignalChart.vue'
@@ -25,14 +23,11 @@ import {
 } from '@/lib/analysis'
 import { REHAB_EXERCISES } from '@/lib/assessment'
 import { formatDateTime } from '@/lib/format'
-import type { RiskBand } from '@/lib/insight'
 import { useCareStore } from '@/stores/care'
-import { usePrefsStore } from '@/stores/prefs'
 import { useSessionStore } from '@/stores/session'
 import { token } from '@/lib/theme'
 
 const sessions = useSessionStore()
-const prefs = usePrefsStore()
 const care = useCareStore()
 
 // ---------------------------------------------------------------------------
@@ -110,60 +105,6 @@ const temperature = computed(() => buildTemperatureHistory(filtered.value))
 const distribution = computed(() => buildExerciseDistribution(filtered.value))
 
 const hasData = computed(() => filtered.value.length > 0)
-
-// ---------------------------------------------------------------------------
-// 家属模式
-// ---------------------------------------------------------------------------
-// 这一页和别处不一样：**图表本身就是内容**，一刀切折叠等于把页面清空。
-// 所以只把真正技术性的两块收起来（识别置信度、温度历史），
-// 再在前面加一句人话结论 —— 家属真正想知道的是"这段时间坚持得怎么样"。
-//
-// 另外家属模式下图表照常显示：趋势图是他最该看的东西，
-// 只是不需要知道"断点表示当天没有该动作的记录"这类画法说明。
-
-/** 家属模式下技术块是否展开。默认收起 */
-const techOpen = ref(false)
-
-/** 当前筛选范围的说法，用在结论里。0 表示"全部时间" */
-const rangeLabel = computed(() =>
-  rangeDays.value > 0 ? `近 ${rangeDays.value} 天` : '全部时间',
-)
-
-/**
- * 结论的风险等级。
- *
- * 只看两件事，因为这两件是页面上**算得准**的：
- *   温度越阈 —— 安全事件，一票否决
- *   达标次数 —— 有几次真的做到了康复目标
- *
- * 刻意不去合成一个"综合评分"：这一页的筛选范围是用户随手选的，
- * 拿一个随筛选变化的分数去和摘要页那个固定 7 天的分数并列，
- * 只会让人以为系统自相矛盾。
- */
-const familyBand = computed<RiskBand>(() => {
-  const s = summary.value
-  if (!s.totalSessions) return 'yellow'
-  if (s.overTempCount > 0) return 'yellow'
-  return s.onTargetCount > 0 ? 'green' : 'yellow'
-})
-
-const familyHeadline = computed(() => {
-  const s = summary.value
-  if (!s.totalSessions) return `${rangeLabel.value}内还没有训练记录`
-  return `${rangeLabel.value}内训练了 ${s.activeDays} 天，共 ${s.totalSessions} 次`
-})
-
-const familyDetail = computed(() => {
-  const s = summary.value
-  if (!s.totalSessions) return '换一个时间范围，或者去「康复评估」记录一次训练'
-  const parts = [`其中 ${s.onTargetCount} 次达到康复目标`]
-  parts.push(
-    s.overTempCount > 0
-      ? `有 ${s.overTempCount} 次皮肤温度超过预警线，需要注意`
-      : '没有温度超标的记录',
-  )
-  return parts.join(' · ')
-})
 
 // ---------------------------------------------------------------------------
 // 图表配置
@@ -303,22 +244,6 @@ onMounted(load)
       empty-text="所选范围内还没有训练记录。去「康复评估」记录一次训练，或放宽筛选范围。"
       @retry="load"
     >
-      <!-- ---------- 家属模式：一句话结论 ---------- -->
-      <ConclusionCard
-        v-if="!prefs.proMode"
-        :band="familyBand"
-        :headline="familyHeadline"
-        :detail="familyDetail"
-      />
-
-      <FoldToggle
-        v-if="!prefs.proMode"
-        :open="techOpen"
-        label="查看技术指标（识别置信度、温度历史）"
-        open-label="收起技术指标"
-        @toggle="techOpen = !techOpen"
-      />
-
       <!-- 概要 -->
       <section class="summary">
         <div class="summary__item">
@@ -344,8 +269,7 @@ onMounted(load)
           <span class="summary__label">温度越阈值</span>
           <p class="summary__value">{{ summary.overTempCount }}</p>
         </div>
-        <!-- 识别置信度是模型内部的数字，家属读了没有用，收进折叠区 -->
-        <div v-if="prefs.proMode || techOpen" class="summary__item">
+        <div class="summary__item">
           <span class="summary__label">平均识别置信度</span>
           <p class="summary__value">{{ summary.avgConfidence.toFixed(3) }}</p>
         </div>
@@ -394,9 +318,7 @@ onMounted(load)
           </p>
         </article>
 
-        <!-- 温度历史是逐次的技术曲线。家属要的是"有没有超标"，
-             那个结论已经在上面那句话里说了，所以这张图收起来 -->
-        <article v-if="prefs.proMode || techOpen" class="panel">
+        <article class="panel">
           <header class="panel__head">
             <h3 class="panel__title">局部温度历史</h3>
             <span class="panel__unit">°C</span>

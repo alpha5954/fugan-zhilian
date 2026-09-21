@@ -31,7 +31,6 @@ import { buildInsight, type Insight } from '@/lib/insight'
 import { useAlertStore } from '@/stores/alert'
 import { useCareStore } from '@/stores/care'
 import { useDeviceStore } from '@/stores/device'
-import { usePrefsStore } from '@/stores/prefs'
 import { useSessionStore } from '@/stores/session'
 import { useUserStore } from '@/stores/user'
 
@@ -40,7 +39,6 @@ const sessions = useSessionStore()
 const alerts = useAlertStore()
 const devices = useDeviceStore()
 const care = useCareStore()
-const prefs = usePrefsStore()
 
 const loading = ref(true)
 /** 「查看详细数据」是否展开。默认折叠 —— 家属要的结论在上面已经有了 */
@@ -260,19 +258,17 @@ onMounted(reload)
           该项按"持平"计分，避免用两三次数据算出夸张的进步率。
         </p>
 
-        <!-- ---------- 技术指标（专业模式） ----------
-             家属模式下这一整块收起，只留一句说明。
-             ⚠️ 文案必须**如实描述**这里到底藏了什么 —— 早先版本写着
-                "还会显示波形、肌电 RMS 与传感器灵敏度曲线"，而那三样
-                当时一个都没实现，等于在界面上写了句假话。
-                加指标的时候要记得同步这句话。 -->
+        <!-- ---------- 传感器技术指标 ----------
+             历史记录：这里曾经有一句"打开专业模式还会显示波形、肌电 RMS 与
+             传感器灵敏度曲线"的提示，而那三样当时一个都没实现 —— 等于在界面上
+             写了句假话。专业模式后来整体撤掉了，这条留作记录：
+             **写字面承诺之前先确认实现了没有。** -->
         <h3 class="detail__title">传感器技术指标</h3>
 
-        <template v-if="prefs.proMode">
-          <p class="detail__note">
-            以下为传感器本体的性能参数，面向工程师与设备评估，不是本周的训练数据。
-          </p>
-          <dl class="tech">
+        <p class="detail__note">
+          以下为传感器本体的性能参数，面向工程师与设备评估，不是本周的训练数据。
+        </p>
+        <dl class="tech">
             <div v-for="m in PERFORMANCE_METRICS" :key="m.label" class="tech__item">
               <dt class="tech__label">{{ m.label }}</dt>
               <dd class="tech__value">
@@ -280,18 +276,7 @@ onMounted(reload)
               </dd>
               <p v-if="m.note" class="tech__note">{{ m.note }}</p>
             </div>
-          </dl>
-        </template>
-
-        <!-- 家属模式下给一句解释，而不是直接不显示 ——
-             医生第一次来看不到会以为系统没做 -->
-        <p v-else class="detail__note">
-          应变灵敏度（GF）、温度灵敏度、循环耐久性等指标面向工程师，
-          家属模式下默认收起。
-          <button type="button" class="detail__link" @click="prefs.setProMode(true)">
-            打开专业模式
-          </button>
-        </p>
+        </dl>
 
         <p class="detail__footnote">
           实时波形与原始信号在
@@ -365,8 +350,7 @@ onMounted(reload)
 /* ==========================================================================
    健康评分
    ==========================================================================
-   整页最重要的一个数字。字号跟着令牌走：家属模式 34×1.9 ≈ 65px，
-   专业模式 24×1.9 ≈ 46px —— 一套写法两种密度。
+   整页最重要的一个数字。字号跟着 --fs-2xl 走，换算后约 46px。
    ========================================================================== */
 .score {
   display: flex;

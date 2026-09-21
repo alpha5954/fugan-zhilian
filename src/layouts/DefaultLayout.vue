@@ -15,7 +15,6 @@ import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import ErrorBoundary from '@/components/ErrorBoundary.vue'
 import { useAlertStore } from '@/stores/alert'
 import { useCareStore } from '@/stores/care'
-import { usePrefsStore } from '@/stores/prefs'
 import { useUserStore } from '@/stores/user'
 import type { UserRole } from '@/types'
 
@@ -24,19 +23,6 @@ const router = useRouter()
 const user = useUserStore()
 const alerts = useAlertStore()
 const care = useCareStore()
-const prefs = usePrefsStore()
-
-/**
- * 专业模式开关。
- *
- * 走 computed 而不是直接 v-model 到 store 上的字段：切换时要同时
- * 写 localStorage 并改 <html> 上的 data-view，那是 setProMode 干的事。
- * 直接绑字段的话这两步都不会发生，开关看起来能用但下次打开就丢了。
- */
-const proMode = computed({
-  get: () => prefs.proMode,
-  set: (on: boolean) => prefs.setProMode(on),
-})
 
 /** 导航项。顺序即展示顺序 */
 const navItems = [
@@ -111,7 +97,7 @@ async function handleCommand(command: string) {
 
 <template>
   <div class="layout">
-    <header class="topbar" :class="{ 'topbar--family': !prefs.proMode }">
+    <header class="topbar">
       <RouterLink to="/dashboard" class="brand">
         <img src="/logo.png" alt="" class="brand__mark" />
         <span class="brand__name">复感智联</span>
@@ -141,14 +127,6 @@ async function handleCommand(command: string) {
       </nav>
 
       <div class="topbar__right">
-        <!-- 家属 / 专业模式切换。
-             默认关：产品的第一读者是家属，他们不该先被 GF、TCR 挡住。
-             打开后字号、控件高度、技术指标的显示范围一起变（见 tokens.css） -->
-        <label class="promode" :title="proMode ? '切回家属模式' : '显示技术指标与原始波形'">
-          <el-switch v-model="proMode" size="small" />
-          <span class="promode__text">专业模式</span>
-        </label>
-
         <!-- 访客不显示用户下拉：他们没有"退出登录"的概念，
              需要的是把当前账号保存下来 -->
         <template v-if="user.isLoggedIn && !user.isGuest">
@@ -350,30 +328,8 @@ async function handleCommand(command: string) {
 
 /* ---------- 右侧区 ---------- */
 .topbar__right {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-4);
   flex-shrink: 0;
   margin-left: auto;
-}
-
-/* ---------- 专业模式开关 ---------- */
-.promode {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  cursor: pointer;
-  user-select: none;
-}
-
-.promode__text {
-  font-size: var(--fs-xs);
-  color: var(--ink-500);
-  white-space: nowrap;
-}
-
-.promode:hover .promode__text {
-  color: var(--ink-800);
 }
 
 .account {
@@ -472,36 +428,6 @@ async function handleCommand(command: string) {
 }
 
 /* ==========================================================================
-   家属模式的中等宽度
-   ==========================================================================
-   家属模式字号大，八个导航项在中等宽度下会挤不下，被横向裁掉 ——
-   实测 1180px 下「监护管理」被截成「监护管」、「关于」整个消失。
-   导航本来是 overflow-x: auto 可滚动的，但**看起来就是坏的**，
-   没人会想到去横滑顶栏。
-
-   所以让它换到第二行。1450px 以上放得下，保持一行。
-
-   用挂在顶栏上的 topbar--family 类，而不是 :global(html[data-view=...]) ——
-   后者在 scoped 样式里没按预期生效（实测仍然溢出）。
-   ========================================================================== */
-@media (max-width: 1450px) {
-  .topbar--family {
-    height: auto;
-    flex-wrap: wrap;
-    gap: var(--sp-1) var(--sp-4);
-    padding-top: var(--sp-2);
-    padding-bottom: var(--sp-2);
-  }
-
-  .topbar--family .nav {
-    order: 3;
-    flex: 1 0 100%;
-    /* 触控下限 */
-    height: 44px;
-  }
-}
-
-/* ==========================================================================
    窄屏适配
    ==========================================================================
    顶部栏原本是「品牌 + 导航 + 用户区」挤在一行，375px 的手机上会互相
@@ -546,17 +472,6 @@ async function handleCommand(command: string) {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  /* 窄屏上只留开关本体，文字省掉 —— 开关的语义靠 title 和位置传达，
-     顶栏这一行本来就已经很挤了 */
-  .promode__text {
-    display: none;
-  }
-
-  /* 手机上导航链接加高到 44px 触控下限 */
-  .nav {
-    height: 44px;
   }
 }
 </style>
