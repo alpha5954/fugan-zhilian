@@ -124,6 +124,20 @@ async function submit() {
 // ---------------------------------------------------------------------------
 // 行操作
 // ---------------------------------------------------------------------------
+
+/**
+ * 把 el-table 插槽给出的 row 收窄回 Device。
+ *
+ * el-table 的插槽类型是 `DefaultRow`（一个泛型记录），不是 `:data` 的元素
+ * 类型 —— 组件内部无法从数据推断出行类型。所以在模板里直接 `calibrate(row)`
+ * 会被类型检查拒绝。
+ *
+ * 值得说明的是：这个错误是**改成按需引入之后才出现的**。此前 el-table 是
+ * 未声明的全局组件，插槽参数是 any，这段调用从来没被真正检查过。类型变严
+ * 反而是好事，只是需要在这里显式声明一次"我知道这是 Device"。
+ */
+const asDevice = (row: unknown): Device => row as Device
+
 /** 把 1.0.0 升到 1.1.0；解析不出来就退回一个默认版本 */
 function nextFirmware(current: string | null): string {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(current ?? '')
@@ -302,14 +316,14 @@ onMounted(loadDevices)
             <el-button
               size="small"
               :loading="busyId === row.id"
-              @click="calibrate(row)"
+              @click="calibrate(asDevice(row))"
             >
               校准
             </el-button>
             <el-button
               size="small"
               :disabled="busyId === row.id"
-              @click="upgrade(row)"
+              @click="upgrade(asDevice(row))"
             >
               升级
             </el-button>
@@ -318,7 +332,7 @@ onMounted(loadDevices)
               type="danger"
               plain
               :disabled="busyId === row.id"
-              @click="unbind(row)"
+              @click="unbind(asDevice(row))"
             >
               解绑
             </el-button>

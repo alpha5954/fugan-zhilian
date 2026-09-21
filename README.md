@@ -9,11 +9,37 @@
 | 框架 | Vue 3（`<script setup>` SFC） |
 | 语言 | TypeScript |
 | 构建 | Vite |
-| UI 组件 | Element Plus |
+| UI 组件 | Element Plus（**按需引入**，见下） |
 | 图表 | ECharts |
 | 路由 | Vue Router |
 | 状态管理 | Pinia |
 | 后端 / 数据库 | Supabase（Postgres + Auth + Data API） |
+
+## 首屏体积
+
+Element Plus **按需引入**，由 `vite.config.ts` 里两个 unplugin 插件完成：
+
+| 插件 | 负责 |
+|---|---|
+| `unplugin-vue-components` | **模板里**用到的组件（`<el-table>` 之类） |
+| `unplugin-element-plus` | **脚本里显式 import** 的服务式 API（`ElMessage` 等，它们不是组件，模板解析器管不到） |
+
+两者缺一不可 —— 只用前者的话 `ElMessage`、`ElMessageBox`、`ElNotification` 会没有样式。
+
+实测效果：
+
+| | 改造前 | 改造后 |
+|---|---|---|
+| 首屏原始 | 1574 KB | **525 KB** |
+| 首屏 gzip | 429 KB | **159 KB** |
+
+### 两个必须知道的注意点
+
+**① `src/components.d.ts` 要提交进仓库。** 它是插件生成的类型声明，让 `vue-tsc` 认识那些"凭空出现"的组件。`npm run build` 先跑 `vue-tsc` 再跑 `vite`，不提交的话 CI 上类型检查会失败。**新增组件后需要先跑一次 `npx vite build` 重新生成**，否则类型检查会报找不到组件。
+
+**② 中文语言包改由 `<el-config-provider>` 提供。** 原先是在 `main.ts` 里 `app.use(ElementPlus, { locale: zhCn })`，按需引入后插件不再全局安装，改在 `App.vue` 里包一层。不改的话分页器、日期选择器、确认框的内置文案会退回英文。
+
+> 顺带一提：改成按需引入后类型检查变严了，`el-table` 插槽的 `row` 从 `any` 变成了 `DefaultRow`，暴露出 `Devices.vue` 里三处未经验证的类型断言。这是好事，已用 `asDevice()` 显式收窄。
 
 ## 环境要求
 
