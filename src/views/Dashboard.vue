@@ -260,34 +260,43 @@ onMounted(reload)
           该项按"持平"计分，避免用两三次数据算出夸张的进步率。
         </p>
 
-        <!-- ---------- 技术指标 ---------- -->
+        <!-- ---------- 技术指标（专业模式） ----------
+             家属模式下这一整块收起，只留一句说明。
+             ⚠️ 文案必须**如实描述**这里到底藏了什么 —— 早先版本写着
+                "还会显示波形、肌电 RMS 与传感器灵敏度曲线"，而那三样
+                当时一个都没实现，等于在界面上写了句假话。
+                加指标的时候要记得同步这句话。 -->
         <h3 class="detail__title">传感器技术指标</h3>
 
-        <!-- 专业模式没开时给一句解释，而不是直接不显示 ——
-             医生第一次来看不到这些会以为系统没做 -->
-        <p v-if="!prefs.proMode" class="detail__note">
-          以下指标面向医生与工程师。打开顶部的「专业模式」还会显示波形、
-          肌电 RMS 与传感器灵敏度曲线。
+        <template v-if="prefs.proMode">
+          <p class="detail__note">
+            以下为传感器本体的性能参数，面向工程师与设备评估，不是本周的训练数据。
+          </p>
+          <dl class="tech">
+            <div v-for="m in PERFORMANCE_METRICS" :key="m.label" class="tech__item">
+              <dt class="tech__label">{{ m.label }}</dt>
+              <dd class="tech__value">
+                {{ m.value }}<span v-if="m.unit" class="tech__unit">{{ m.unit }}</span>
+              </dd>
+              <p v-if="m.note" class="tech__note">{{ m.note }}</p>
+            </div>
+          </dl>
+        </template>
+
+        <!-- 家属模式下给一句解释，而不是直接不显示 ——
+             医生第一次来看不到会以为系统没做 -->
+        <p v-else class="detail__note">
+          应变灵敏度（GF）、温度灵敏度、循环耐久性等指标面向工程师，
+          家属模式下默认收起。
           <button type="button" class="detail__link" @click="prefs.setProMode(true)">
-            现在打开
+            打开专业模式
           </button>
         </p>
 
-        <dl class="tech">
-          <div v-for="m in PERFORMANCE_METRICS" :key="m.label" class="tech__item">
-            <dt class="tech__label">{{ m.label }}</dt>
-            <dd class="tech__value">
-              {{ m.value }}<span v-if="m.unit" class="tech__unit">{{ m.unit }}</span>
-            </dd>
-            <p v-if="m.note" class="tech__note">{{ m.note }}</p>
-          </div>
-        </dl>
-
         <p class="detail__footnote">
-          以上为传感器本体的性能指标（来自计划书），不是本周的训练数据。
           实时波形与原始信号在
           <RouterLink to="/monitor" class="detail__link">实时监测</RouterLink>
-          页。本周的技术数据在
+          页，本周的训练数据在
           <RouterLink to="/analysis" class="detail__link">数据分析</RouterLink>
           页。
         </p>
