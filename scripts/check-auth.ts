@@ -23,8 +23,17 @@ function check(label: string, ok: boolean, detail = '') {
 console.log('\n--- 认证回调的识别 ---')
 // ============================================================================
 
-/** 断言解析结果 */
-function expectParse(label: string, hash: string, want: AuthCallback) {
+/**
+ * 断言解析结果。
+ *
+ * 只比 fromRecoveryLink 和 errorCode 两项；isAuthCallback 管的是
+ * "要不要清地址栏"，判据不同，另有专门的用例
+ */
+function expectParse(
+  label: string,
+  hash: string,
+  want: Pick<AuthCallback, 'fromRecoveryLink' | 'errorCode'>,
+) {
   const got = parseAuthCallback(hash)
   const ok =
     got.fromRecoveryLink === want.fromRecoveryLink &&
@@ -101,6 +110,36 @@ expectParse(
     '带 + 号的描述不影响其它字段',
     got.fromRecoveryLink && got.errorCode === 'otp_expired',
     JSON.stringify(got),
+  )
+}
+
+// ============================================================================
+console.log('\n--- 该不该清地址栏 ---')
+// ============================================================================
+// 判据是"hash 里有没有认证参数"，比"是不是恢复链接"宽：
+// 令牌换会话失败时也要清，否则那串 access_token 会一直挂在地址栏里，
+// 被截图、被复制，还会随 Referer 头漏给第三方。
+{
+  const cases: [string, string, boolean][] = [
+    ['带令牌', '#access_token=abc&type=recovery', true],
+    ['只有 refresh_token 也算', '#refresh_token=abc&type=recovery', true],
+    ['只有错误码', '#error=access_denied&error_code=otp_expired', true],
+    ['只有 error 没有 error_code', '#error=access_denied', true],
+    ['令牌和错误码都有', '#access_token=abc&error_code=otp_expired', true],
+    ['空 hash', '', false],
+    ['只有 #', '#', false],
+    ['无关的 hash（锚点）', '#section-2', false],
+    ['无关的查询串', '#tab=history&page=2', false],
+  ]
+  const bad: string[] = []
+  for (const [label, hash, want] of cases) {
+    const got = parseAuthCallback(hash).isAuthCallback
+    if (got !== want) bad.push(`${label}: 期望 ${want} 得到 ${got}`)
+  }
+  check(
+    `isAuthCallback 的 ${cases.length} 种情况都判对`,
+    bad.length === 0,
+    bad.join('; '),
   )
 }
 

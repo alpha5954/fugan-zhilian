@@ -23,20 +23,27 @@ function check(label, ok, detail = '') {
   console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${label}${detail ? `  ->  ${detail}` : ''}`)
 }
 
-/** 打开一个地址，等应用稳定下来，返回最终的 path 和页面文字 */
+/** 打开一个地址，等应用稳定下来，返回最终的 path、hash 和页面文字 */
 async function visit(page, path) {
   const errors = []
   const onError = (e) => errors.push(e.message)
   page.on('pageerror', onError)
 
+  // ⚠️ 先跳到 about:blank 强制一次真导航。
+  //
+  // playwright 的 goto 在"新地址和当前地址只差 hash"时走的是**同文档导航**：
+  // 页面不重新加载，模块不重新求值，于是读到的还是上一次那套认证参数。
+  // 这个坑真的骗过我一次——线上验证时"过期链接"显示成了"链接没能验证通过"，
+  // 排查半天才发现是测试自己的问题，不是应用的问题。
+  await page.goto('about:blank')
   await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' })
   // 守卫里的 await init() 之后还可能再跳一次（恢复模式的锁），等它落定
   await page.waitForTimeout(1200)
 
   const text = await page.locator('body').innerText()
-  const finalPath = new URL(page.url()).pathname
+  const final = new URL(page.url())
   page.off('pageerror', onError)
-  return { text, finalPath, errors }
+  return { text, finalPath: final.pathname, hash: final.hash, errors }
 }
 
 const browser = await chromium.launch()
@@ -83,7 +90,7 @@ try {
   {
     // ① 链接过期：URL 里带着 error_code，没有令牌
     const page = await browser.newPage()
-    const { text, finalPath, errors } = await visit(
+    const { text, finalPath, hash, errors } = await visit(
       page,
       '/reset-password#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid',
     )
@@ -96,6 +103,11 @@ try {
     )
     check('过期链接不显示密码表单', !text.includes('确认新密码'))
     check('过期链接没有 JS 异常', errors.length === 0, errors.join(' | '))
+    check(
+      '过期链接带过的参数也清掉了',
+      hash === '' || hash === '#',
+      `地址栏残留 ${hash}`,
+    )
     await page.close()
   }
 
@@ -119,7 +131,7 @@ try {
   // 用户必须被送到 /reset-password。落错地方就说明整套流程静默失效了。
   {
     const page = await browser.newPage()
-    const { finalPath, text } = await visit(
+    const { finalPath, text, hash } = await visit(
       page,
       '/monitor#access_token=fake.token.value&refresh_token=fake&type=recovery',
     )
@@ -129,6 +141,56 @@ try {
       `最终停在 ${finalPath}`,
     )
     check('页面不是空白', text.trim().length > 0)
+    // 令牌不能留在地址栏里：会被截图、被复制，还会随 Referer 头漏给第三方。
+    // 守卫用的是 router.replace，它不动 hash —— 所以清 hash 得应用自己来做
+    check(
+      '令牌已从地址栏清除',
+      hash === '' || hash === '#',
+      `地址栏残留 ${hash}`,
+    )
+    await page.close()
+  }
+
+  {
+    // 带令牌进门被送到设置新密码页之后，**刷新一次不能又变成另一种状态**。
+    // 这是"没清 hash"最典型的后果：SDK 拿同一个用过的令牌再解析一遍，
+    // 报出一个和用户操作毫无关系的失败
+    const page = await browser.newPage()
+    const first = await visit(
+      page,
+      '/monitor#access_token=fake.token.value&refresh_token=fake&type=recovery',
+    )
+    await page.reload({ waitUntil: 'networkidle' })
+    await page.waitForTimeout(1200)
+    const second = await page.locator('body').innerText()
+    const secondPath = new URL(page.url()).pathname
+
+    check(
+      '刷新后仍停在设置新密码页',
+      secondPath.endsWith('/reset-password'),
+      `刷新后停在 ${secondPath}`,
+    )
+    // 刷新后 hash 已经清了，应用无从知道用户是从邮件来的，于是落回
+    // "直接访问"的措辞。这不是 bug，但要确保它仍然是个**能走出去的状态**，
+    // 而不是白屏或者一个没有出口的死胡同。
+    check(
+      '刷新后仍给得出重新申请的出口',
+      second.includes('重新申请') || second.includes('登录页'),
+      second.slice(0, 120),
+    )
+    check(
+      '刷新后不会误显示密码表单',
+      !second.includes('确认新密码'),
+      '没有会话却显示了改密码表单',
+    )
+    check('刷新后仍是可读页面，不是白屏', second.trim().length > 0)
+    // 记一笔：两次的首屏文案会不同（"没能验证通过" → "需要从邮件的链接进入"），
+    // 这是清除 hash 的必然结果，不是状态错乱
+    check(
+      '首次加载报的是"令牌没换成会话"',
+      first.text.includes('没能验证通过'),
+      first.text.slice(0, 80),
+    )
     await page.close()
   }
 

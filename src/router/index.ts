@@ -6,6 +6,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 
 import DefaultLayout from '@/layouts/DefaultLayout.vue'
+import { consumeAuthHashFlag } from '@/lib/authRedirect'
 import { useUserStore } from '@/stores/user'
 import type { UserRole } from '@/types'
 
@@ -174,6 +175,24 @@ router.beforeEach(async (to) => {
   // 放在最前面，公开页面（比如「关于」）也不放行：此刻该做的只有一件事。
   if (user.recoveryMode && to.name !== 'reset-password') {
     return { name: 'reset-password' }
+  }
+
+  // -------------------------------------------------------------------------
+  // 把认证参数从地址栏里抹掉
+  // -------------------------------------------------------------------------
+  // 到这一步 SDK 已经读过 hash、换出会话了（init 里 await 了 getSession），
+  // 留着它只有坏处：会随 Referer 头漏给第三方，被截图带走，用户刷新时还会
+  // 拿同一个用过的令牌再解析一遍、报出一个和他无关的错误。
+  //
+  // ⚠️ 必须用 router 的重定向来清，不能直接 history.replaceState ——
+  //    vue-router 启动时就把带 hash 的地址记进了自己的 history.state，
+  //    之后保存滚动位置时会拿那份记录写回去，直接清等于白清（实测过）。
+  //    走重定向的话 router 自己的记录也一起变成不带 hash 的。
+  //
+  // 放在恢复模式那道锁**之后**：那种情况下 router 会重新拼一个不带 hash 的
+  // 地址，hash 自然就没了，不必多绕一次重定向。
+  if (to.hash && consumeAuthHashFlag()) {
+    return { path: to.path, query: to.query, hash: '', replace: true }
   }
 
   const isPublic = to.meta.public === true

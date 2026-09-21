@@ -141,19 +141,19 @@ GitHub Pages 是静态托管，**不支持 SPA 回退**：直接访问 `/fugan-z
 ## 逻辑自检
 
 ```bash
-npm run check              # 全部（139 项）
+npm run check              # 全部（140 项）
 npm run check:simulator    # 信号模拟器的物理关系与信号丢失（17 项）
 npm run check:assessment   # 康复评估的指标计算与入库数据（52 项）
 npm run check:analysis     # 数据分析的聚合逻辑（28 项）
 npm run check:alerts       # 实时监测的预警判据（16 项）
-npm run check:auth         # 认证回调识别与错误码翻译（26 项）
+npm run check:auth         # 认证回调识别、地址栏清理与错误码翻译（27 项）
 ```
 
 五个脚本都用 `node` 直接执行 `.ts`，靠的是 Node 22.6+ 的类型剥离，不需要额外装测试框架。
 
 ### 认证相关的界面验证
 
-上面那些是纯逻辑断言，跑不到"用户点完邮件到底落在哪个页面"这种问题上。那部分由 `supabase/dev/e2e_auth_ui.mjs` 用 Playwright 驱动真实浏览器验证（22 项）：
+上面那些是纯逻辑断言，跑不到"用户点完邮件到底落在哪个页面"这种问题上。那部分由 `supabase/dev/e2e_auth_ui.mjs` 用 Playwright 驱动真实浏览器验证（29 项）：
 
 ```bash
 npm run dev                                     # 另开一个终端
@@ -334,6 +334,20 @@ Supabase 的恢复链接把令牌放在 hash 里（`#access_token=...&type=recov
 点完邮件那一刻，用户手里是一个货真价实的登录会话。没有这道锁的话他会一路正常地进首页、逛各个页面，然后大概率再也想不起来自己是来改密码的。锁在 `router/index.ts` 的最前面，公开页面也不放行。
 
 三种进不到表单的情况分开说，而不是统一一句"出错了"：**链接过期**（URL 带 `error_code`）、**令牌没换成会话**（可能被邮件客户端截断）、**直接敲地址**。前两种给出「重新申请一封」，第三种指回登录页。
+
+**④ 地址栏里的令牌要清掉——而且只能让 vue-router 去清。**
+
+令牌和错误码用完必须从 URL 里抹掉：否则会随 `Referer` 头漏给第三方、被截图带走，用户刷新时还会拿同一个用过的令牌再解析一遍、报出一个和他无关的错误。
+
+但**直接在 `authRedirect.ts` 里调 `history.replaceState` 是白费力气**。实测的调用记录：
+
+```
+1. /reset-password#error=...   ← vue-router 初始化，把带 hash 的地址记进 history.state
+2. /reset-password            ← 直接 replaceState（清干净了）
+3. /reset-password#error=...   ← vue-router 拿它自己那份记录又写了回来
+```
+
+vue-router 保存滚动位置时会用它内部记的地址做 `replaceState`，所以第 3 步必然发生。正确做法是在路由守卫里**返回一个去掉 hash 的重定向**，让 router 自己的记录一起变成不带 hash 的。判断"要不要清"由 `consumeAuthHashFlag()` 一次性给出（`isAuthCallback` 那条纯逻辑有自检覆盖）。
 
 **③ 错误提示要翻译。**
 

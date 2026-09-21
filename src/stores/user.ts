@@ -526,6 +526,9 @@ export const useUserStore = defineStore('user', () => {
       loading.value = false
       initialized.value = true
     }
+    // 注：地址栏里的认证参数（令牌 / 错误码）由路由守卫在这之后清掉。
+    // 不能在这里清 —— vue-router 会拿它自己记的那份地址写回去，白清。
+    // 详见 lib/authRedirect.ts 里 consumeAuthHashFlag 的说明。
   }
 
   return {
