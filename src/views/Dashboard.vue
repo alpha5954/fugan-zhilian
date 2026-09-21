@@ -66,8 +66,10 @@ const cards = computed<MetricCard[]>(() => {
       label: '未处理预警',
       value: loading.value ? '—' : String(alertCount),
       unit: '条',
-      hint: alertCount > 0 ? '需要关注' : '暂无异常',
+      hint: alertCount > 0 ? '点此查看并处理' : '暂无异常',
       tone: alertCount > 0 ? 'danger' : 'ok',
+      // 之前这张卡片没有 to，数字点不进去 —— 预警是只写不读的
+      to: { name: 'alerts' },
     },
     {
       key: 'devices',

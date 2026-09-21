@@ -61,6 +61,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '实时监测' },
       },
       {
+        path: 'alerts',
+        name: 'alerts',
+        component: () => import('@/views/Alerts.vue'),
+        meta: { title: '预警记录' },
+      },
+      {
         path: 'assessment',
         name: 'assessment',
         component: () => import('@/views/Assessment.vue'),

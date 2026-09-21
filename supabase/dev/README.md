@@ -61,6 +61,7 @@ docker exec fugan-pgtest psql -U postgres -d postgres \
 | `care_links_test.sql` | 监护关系的权限边界（本地）。含「家属不能自行变更关系类型」等 6 项 |
 | `e2e_care_links.py` | 监护关系端到端（真实环境）：33 项断言，覆盖三方（患者/家属/无关用户）的完整流程 |
 | `e2e_guest_mode.mjs` | 访客模式关键路径：匿名登录 → 建档 → 普通 RLS 通道 → **升级后 uid 与数据保留** |
+| `e2e_alerts.py` | 预警列表的筛选/已读/取消/删除，以及列级授权对「降级 critical」的拦截 |
 
 > `e2e_guest_mode.mjs` 用 Node 而非 Python，因为要验的正是 supabase-js 客户端的行为（`signInAnonymously` / `updateUser`），手写 HTTP 请求测不出这一层。
 

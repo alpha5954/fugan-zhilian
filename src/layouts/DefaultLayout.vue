@@ -2,7 +2,7 @@
 // ============================================================================
 // 默认布局 —— 顶部导航栏 + 主内容区
 // ============================================================================
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
 import { useAlertStore } from '@/stores/alert'
@@ -35,13 +35,28 @@ function dismissGuestTip() {
 // 在布局层拉一次监护关系 —— 角标和"正在查看谁"的提示条都要用，
 // 放到各页面里拉会导致切页面时角标闪烁
 onMounted(() => {
-  if (user.isLoggedIn && !care.loaded) void care.fetchAll()
+  if (!user.isLoggedIn) return
+  if (!care.loaded) void care.fetchAll()
+  void alerts.fetchUnacknowledgedCount(care.activePatientId)
 })
+
+// 预警角标也要在布局层维护。
+//
+// 之前只有首页会调 fetchUnacknowledgedCount()，所以在其他页面上角标是
+// 过期的 —— 用户明明处理完预警了，切到别的页面红色角标还挂着。
+// 另外家属切换查看对象后也要重算，否则角标显示的是上一个对象的数量。
+watch(
+  () => care.viewingPatientId,
+  (pid) => {
+    void alerts.fetchUnacknowledgedCount(pid ?? user.userId ?? undefined)
+  },
+)
 
 /** 导航项。顺序即展示顺序 */
 const navItems = [
   { path: '/dashboard', label: '概览' },
   { path: '/monitor', label: '实时监测' },
+  { path: '/alerts', label: '预警记录' },
   { path: '/assessment', label: '康复评估' },
   { path: '/analysis', label: '数据分析' },
   { path: '/devices', label: '我的设备' },
@@ -98,7 +113,7 @@ async function handleCommand(command: string) {
         >
           {{ item.label }}
           <span
-            v-if="item.path === '/dashboard' && alertBadge > 0"
+            v-if="item.path === '/alerts' && alertBadge > 0"
             class="layout__badge"
           >
             {{ alertBadge > 99 ? '99+' : alertBadge }}
