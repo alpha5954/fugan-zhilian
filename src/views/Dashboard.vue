@@ -1,20 +1,37 @@
 <script setup lang="ts">
 // ============================================================================
-// 概览首页
+// 健康摘要页（首页）
 // ============================================================================
-// 三块内容：当前状态的核心指标、传感器性能参数、常用功能入口。
-// 指标走真实数据（RLS 决定范围），性能参数是计划书里的静态指标。
+// 这是整个系统的第一屏，也是**唯一一屏家属一定会看**的页面。
+//
+// 【设计取向】
+// 从"技术 Demo"改成"家属能看懂的康复摘要"：
+//
+//   改造前：今日训练 3 次 / 未处理预警 0 条 / 在线设备 1/1 台 / 最近训练 2 小时前
+//   改造后：一个分数 + 三句话
+//
+// 前者的每一项都要家属自己换算成"那我该怎么办"，
+// 后者直接告诉他：恢复得怎么样、有没有危险、该做什么。
+//
+// 【为什么分数可以展开】
+// 一个孤零零的"82 分"是没法被信任的 —— 家属不知道它怎么来的，
+// 医生更不会认。所以四个分量的算法与依据全部摊开在「详细数据」里，
+// 每一项都能说清"是什么、怎么算、这次为什么是这个值"。
+//
+// 换言之：**结论要简单，依据要完整**。这两件事不矛盾。
 // ============================================================================
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import type { RouteLocationRaw } from 'vue-router'
 
+import RiskBadge from '@/components/RiskBadge.vue'
 import StateBlock from '@/components/StateBlock.vue'
-import { PERFORMANCE_METRICS, PROJECT } from '@/constants/project'
-import { formatRelative } from '@/lib/format'
+import { PERFORMANCE_METRICS } from '@/constants/project'
+import { buildDemoAlerts, buildDemoSessions } from '@/lib/demoData'
+import { buildInsight, type Insight } from '@/lib/insight'
 import { useAlertStore } from '@/stores/alert'
 import { useCareStore } from '@/stores/care'
 import { useDeviceStore } from '@/stores/device'
+import { usePrefsStore } from '@/stores/prefs'
 import { useSessionStore } from '@/stores/session'
 import { useUserStore } from '@/stores/user'
 
@@ -23,8 +40,11 @@ const sessions = useSessionStore()
 const alerts = useAlertStore()
 const devices = useDeviceStore()
 const care = useCareStore()
+const prefs = usePrefsStore()
 
 const loading = ref(true)
+/** 「查看详细数据」是否展开。默认折叠 —— 家属要的结论在上面已经有了 */
+const detailOpen = ref(false)
 
 const greeting = computed(() => {
   const h = new Date().getHours()
@@ -35,100 +55,68 @@ const greeting = computed(() => {
   return '晚上好'
 })
 
-/** 核心指标卡片 */
-interface MetricCard {
-  key: string
-  label: string
-  value: string
-  unit: string
-  hint: string
-  /** danger 用于需要立刻关注的状态 */
-  tone?: 'default' | 'danger' | 'ok'
-  to?: RouteLocationRaw
+/**
+ * 拉取窗口要盖住"本周 + 基线"。
+ *
+ * 基线是本周之前的 14 天，所以最早要到 21 天前 —— 只取最近 20 条的话，
+ * 一个训练频繁的患者可能连本周都凑不齐，进步度会永远显示"数据不够"。
+ * 用时间下界而不是数量上限，才是按窗口取的。
+ */
+function windowStart(): Date {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() - 21)
+  return d
 }
 
-const cards = computed<MetricCard[]>(() => {
-  const alertCount = alerts.unacknowledgedTotal
+/** 真实数据的摘要 */
+const realInsight = computed(() =>
+  buildInsight(sessions.sessions, alerts.alerts),
+)
 
-  return [
-    {
-      key: 'today',
-      label: '今日训练',
-      value: loading.value ? '—' : String(sessions.todayTotal),
-      unit: '次',
-      hint: sessions.latest
-        ? `最近一次 ${formatRelative(sessions.latest.started_at)}`
-        : '还没有训练记录',
-      to: { name: 'assessment' },
-    },
-    {
-      key: 'alerts',
-      label: '未处理预警',
-      value: loading.value ? '—' : String(alertCount),
-      unit: '条',
-      hint: alertCount > 0 ? '点此查看并处理' : '暂无异常',
-      tone: alertCount > 0 ? 'danger' : 'ok',
-      // 之前这张卡片没有 to，数字点不进去 —— 预警是只写不读的
-      to: { name: 'alerts' },
-    },
-    {
-      key: 'devices',
-      label: '在线设备',
-      value: loading.value ? '—' : `${devices.onlineCount}`,
-      unit: `/ ${devices.devices.length} 台`,
-      hint: devices.devices.length
-        ? '传感器运行正常'
-        : '尚未绑定设备',
-      to: { name: 'devices' },
-    },
-    {
-      key: 'last',
-      label: '最近训练',
-      value: loading.value ? '—' : formatRelative(sessions.latest?.started_at),
-      unit: '',
-      hint: sessions.latest
-        ? `${sessions.latest.exercise} · ${sessions.latest.rep_count ?? '—'} 次`
-        : '开始第一次训练吧',
-      to: { name: 'analysis' },
-    },
-  ]
-})
+/** 任一 store 出错就展示出来，不要让页面静静地显示成"没有记录" */
+const loadError = computed(
+  () => sessions.error ?? alerts.error ?? devices.error ?? null,
+)
 
-/** 快速入口 */
-const entries = [
-  {
-    to: { name: 'monitor' },
-    title: '实时监测',
-    detail: '查看传感器应变与温度双通道的实时信号',
-  },
-  {
-    to: { name: 'assessment' },
-    title: '康复评估',
-    detail: '本次训练的动作识别结果、置信度与关节活动度',
-  },
-  {
-    to: { name: 'analysis' },
-    title: '数据分析',
-    detail: '关节活动度趋势、训练依从性与预警分布',
-  },
-  {
-    to: { name: 'devices' },
-    title: '我的设备',
-    detail: '绑定传感器、查看在线状态与电量',
-  },
-] as const
+/**
+ * 该展示演示数据吗：加载完了、没出错、而且一条记录都没有。
+ *
+ * 首次打开链接的人（评审、家属、队友）一定没有历史记录，而健康摘要页
+ * 的价值完全建立在历史上。让他们看到一个空页面等于这套东西没做。
+ */
+const usingDemo = computed(
+  () => !loading.value && !loadError.value && !realInsight.value.stats.hasAnyData,
+)
+
+/**
+ * 演示摘要，算一次就缓存住。
+ *
+ * ⚠️ 刻意用普通变量而不是 ref。
+ *    generateSession 要跑一遍信号模拟，放进 computed 每次渲染都重算太亏；
+ *    但把缓存写成 ref、又在 computed 里读它，会形成"computed 写自己依赖的
+ *    响应式变量"的回环。普通变量不参与响应式，没有这个问题。
+ */
+let demoCache: Insight | null = null
+function demoInsight(): Insight {
+  demoCache ??= buildInsight(buildDemoSessions(), buildDemoAlerts())
+  return demoCache
+}
+
+/** 页面实际展示的那份摘要 */
+const insight = computed(() =>
+  usingDemo.value ? demoInsight() : realInsight.value,
+)
 
 async function reload() {
   loading.value = true
   try {
-    // 四个请求互不依赖，并发发出。
-    // 全部带上 patientId —— 家属的 RLS 范围是多个监护对象，
-    // 不指定的话四张卡片会显示成几个人的合计
+    // 并发发出。全部带上 patientId —— 家属的 RLS 范围是多个监护对象，
+    // 不指定的话会把几个人的数据混在一起算成一个分数
     const pid = care.activePatientId
     await Promise.all([
-      sessions.fetch({ limit: 20, patientId: pid }),
-      sessions.fetchTodayCount(pid),
-      alerts.fetchUnacknowledgedCount(pid),
+      sessions.fetch({ limit: 300, patientId: pid, from: windowStart() }),
+      alerts.fetch({ limit: 200, patientId: pid }),
       devices.fetchAll({ ownerId: pid }),
     ])
   } finally {
@@ -137,315 +125,646 @@ async function reload() {
 }
 
 // 切换查看对象后要重新拉数据。
-//
-// ⚠️ 监听的是 viewingPatientId（用户主动切换）而不是 activePatientId。
-//    activePatientId 在登录完成时也会从 undefined 变成自己的 id，
-//    监听它会让首次加载多发一轮请求 —— 四个接口各发两遍。
-//    用户点顶部提示条的「返回我自己」同样会改 viewingPatientId，所以覆盖得到。
+// 监听 viewingPatientId（用户主动切换）而不是 activePatientId ——
+// 后者在登录完成时也会变，会让首次加载多发一轮请求。
 watch(() => care.viewingPatientId, reload)
-
-/**
- * 任一 store 出错就展示出来。
- *
- * 之前这里什么都没有 —— 拉取失败时四张卡片会静静地显示 0 和"—"，
- * 与"确实还没有数据"完全无法区分。用户只会以为系统坏了或者自己没记录。
- */
-const loadError = computed(
-  () => sessions.error ?? alerts.error ?? devices.error ?? null,
-)
 
 onMounted(reload)
 </script>
 
 <template>
-  <div class="dash">
-    <!-- 欢迎 -->
-    <header class="dash__welcome">
-      <h1 class="dash__hello">
-        {{ greeting }}，{{ user.displayName || '访客' }}
-      </h1>
-      <p class="dash__subtitle">{{ PROJECT.subtitle }}</p>
+  <div class="home">
+    <!-- ================= 问候 ================= -->
+    <header class="hello">
+      <h1 class="hello__text">{{ greeting }}，{{ user.displayName || '朋友' }}</h1>
+      <p class="hello__sub">
+        {{
+          care.isViewingOther
+            ? `下面是 ${care.activePatientName} 的康复情况`
+            : '下面是您本周的康复情况'
+        }}
+      </p>
     </header>
 
-    <!-- 拉取失败时给出出口。loading / empty 都为 false，
-         所以这里只会在有错误时渲染出提示，正常情况下什么都不显示 -->
     <StateBlock :error="loadError" @retry="reload" />
 
-    <!-- 核心指标 -->
-    <section class="dash__cards">
-      <component
-        :is="card.to ? RouterLink : 'div'"
-        v-for="card in cards"
-        :key="card.key"
-        :to="card.to"
-        class="card"
-        :class="[`card--${card.tone ?? 'default'}`, { 'card--link': card.to }]"
+    <!-- ================= 演示数据声明 =================
+         项目的一条底线是不把模拟数据说成实测数据（见 README「数据来源」）。
+         演示数据同样适用：用了就必须明确标出来，而且要给出路 ——
+         告诉用户怎么才能看到自己的真实数据 -->
+    <aside v-if="usingDemo" class="demo" role="note">
+      <span class="demo__tag">演示数据</span>
+      <p class="demo__text">
+        您还没有训练记录，下面用一组示例数据展示系统能给出什么样的结论。
+        绑定传感器并完成第一次训练后，这里会自动换成您自己的数据。
+      </p>
+    </aside>
+
+    <!-- ================= 健康评分 ================= -->
+    <section class="score" :class="`score--${insight.scoreBand}`">
+      <p class="score__label">本周恢复评分</p>
+
+      <!-- 没数据时不显示 0 分 —— "0 分"和"还没有数据"是两件事，
+           前者会让刚装上设备的家属以为出了大问题 -->
+      <p
+        v-if="insight.score !== null"
+        class="score__value"
+        :class="`score__value--${insight.scoreBand}`"
       >
-        <span class="card__label">{{ card.label }}</span>
-        <p class="card__value">
-          <span class="card__number">{{ card.value }}</span>
-          <span v-if="card.unit" class="card__unit">{{ card.unit }}</span>
-        </p>
-        <span class="card__hint">{{ card.hint }}</span>
-      </component>
+        <span class="score__number">{{ insight.score }}</span>
+        <span class="score__unit">分</span>
+      </p>
+      <p v-else class="score__value score__value--empty">— —</p>
+
+      <!-- 风险单独一行，并且**写明它说的是"风险"**。
+           分数和风险是两个不同的轴：可能恢复得很好但有一次温度超标。
+           不加这个标签的话，家属会以为角标是在评价上面那个分数 ——
+           实测截图里就出现过"92 分配橙色需要注意"这种自相矛盾的画面 -->
+      <p class="score__risk">
+        <span class="score__risk-label">本周风险</span>
+        <RiskBadge :band="insight.band" size="md" />
+      </p>
+
+      <p class="score__headline">{{ insight.headline }}</p>
+
+      <!-- 无数据时给一条明确的出路，而不是让家属对着空白页发呆 -->
+      <div v-if="!insight.stats.hasAnyData" class="score__cta">
+        <RouterLink to="/devices" class="btn btn--primary">绑定传感器</RouterLink>
+        <RouterLink to="/monitor" class="btn">先看看实时信号</RouterLink>
+      </div>
     </section>
 
-    <!-- 传感器性能 -->
-    <section class="dash__section">
-      <div class="dash__section-head">
-        <h2 class="dash__section-title">传感器核心性能</h2>
-        <RouterLink to="/about" class="dash__more">技术详情 →</RouterLink>
-      </div>
-
-      <div class="metrics">
-        <div
-          v-for="m in PERFORMANCE_METRICS"
-          :key="m.label"
-          class="metric"
-          :class="{ 'metric--highlight': m.highlight }"
-        >
-          <span class="metric__label">{{ m.label }}</span>
-          <p class="metric__value">
-            <span class="metric__number">{{ m.value }}</span>
-            <span v-if="m.unit" class="metric__unit">{{ m.unit }}</span>
-          </p>
-          <span v-if="m.note" class="metric__note">{{ m.note }}</span>
+    <!-- ================= 三张家属语言卡片 ================= -->
+    <section class="cards" aria-label="康复摘要">
+      <article
+        v-for="card in insight.cards"
+        :key="card.key"
+        class="fcard"
+        :class="`fcard--${card.band}`"
+      >
+        <div class="fcard__head">
+          <span class="fcard__icon" aria-hidden="true">{{ card.icon }}</span>
+          <h2 class="fcard__title">{{ card.title }}</h2>
+          <RiskBadge :band="card.band" dot size="sm" />
         </div>
-      </div>
+        <p class="fcard__headline">{{ card.headline }}</p>
+        <p v-if="card.detail" class="fcard__detail">{{ card.detail }}</p>
+      </article>
     </section>
 
-    <!-- 快速入口 -->
-    <section class="dash__section">
-      <h2 class="dash__section-title">快速入口</h2>
+    <!-- ================= 折叠：详细数据 ================= -->
+    <section class="detail">
+      <button
+        type="button"
+        class="detail__toggle"
+        :aria-expanded="detailOpen"
+        @click="detailOpen = !detailOpen"
+      >
+        <span>{{ detailOpen ? '收起详细数据' : '查看详细数据' }}</span>
+        <span class="detail__chevron" :class="{ 'is-open': detailOpen }" aria-hidden="true">
+          ▾
+        </span>
+      </button>
 
-      <div class="entries">
-        <RouterLink
-          v-for="entry in entries"
-          :key="entry.title"
-          :to="entry.to"
-          class="entry"
-        >
-          <span class="entry__title">{{ entry.title }}</span>
-          <span class="entry__detail">{{ entry.detail }}</span>
-        </RouterLink>
+      <div v-if="detailOpen" class="detail__body">
+        <!-- ---------- 评分是怎么算出来的 ---------- -->
+        <h3 class="detail__title">评分是怎么算出来的</h3>
+        <p class="detail__note">
+          总分由下面四项加权得出，每一项都能单独核对。
+        </p>
+
+        <ul class="parts">
+          <li v-for="part in insight.parts" :key="part.key" class="part">
+            <div class="part__head">
+              <span class="part__label">{{ part.label }}</span>
+              <span class="part__weight">占 {{ Math.round(part.weight * 100) }}%</span>
+              <span class="part__score">{{ Math.round(part.value * 100) }}</span>
+            </div>
+            <div
+              class="part__bar"
+              role="img"
+              :aria-label="`${part.label} ${Math.round(part.value * 100)} 分`"
+            >
+              <span
+                class="part__fill"
+                :style="{ width: `${Math.round(part.value * 100)}%` }"
+              />
+            </div>
+            <p class="part__detail">{{ part.detail }}</p>
+          </li>
+        </ul>
+
+        <p class="detail__footnote">
+          「动作达标」按各动作自己的康复目标判定，静力动作（靠墙静蹲）看的是
+          保持角度、不参与该项；「进步情况」与之前两周比较；历史记录少于 3 次时
+          该项按"持平"计分，避免用两三次数据算出夸张的进步率。
+        </p>
+
+        <!-- ---------- 技术指标 ---------- -->
+        <h3 class="detail__title">传感器技术指标</h3>
+
+        <!-- 专业模式没开时给一句解释，而不是直接不显示 ——
+             医生第一次来看不到这些会以为系统没做 -->
+        <p v-if="!prefs.proMode" class="detail__note">
+          以下指标面向医生与工程师。打开顶部的「专业模式」还会显示波形、
+          肌电 RMS 与传感器灵敏度曲线。
+          <button type="button" class="detail__link" @click="prefs.setProMode(true)">
+            现在打开
+          </button>
+        </p>
+
+        <dl class="tech">
+          <div v-for="m in PERFORMANCE_METRICS" :key="m.label" class="tech__item">
+            <dt class="tech__label">{{ m.label }}</dt>
+            <dd class="tech__value">
+              {{ m.value }}<span v-if="m.unit" class="tech__unit">{{ m.unit }}</span>
+            </dd>
+            <p v-if="m.note" class="tech__note">{{ m.note }}</p>
+          </div>
+        </dl>
+
+        <p class="detail__footnote">
+          以上为传感器本体的性能指标（来自计划书），不是本周的训练数据。
+          实时波形与原始信号在
+          <RouterLink to="/monitor" class="detail__link">实时监测</RouterLink>
+          页。本周的技术数据在
+          <RouterLink to="/analysis" class="detail__link">数据分析</RouterLink>
+          页。
+        </p>
       </div>
     </section>
   </div>
 </template>
 
 <style scoped>
-.dash {
+.home {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--sp-5);
 }
 
-/* ---------- 欢迎 ---------- */
-.dash__hello {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 600;
+/* ==========================================================================
+   问候
+   ========================================================================== */
+.hello__text {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
   color: var(--ink-800);
 }
 
-.dash__subtitle {
-  margin: 6px 0 0;
-  font-size: 13px;
-  color: var(--ink-400);
+.hello__sub {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-500);
 }
 
-/* ---------- 指标卡片 ---------- */
-.dash__cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-}
-
-.card {
+/* ==========================================================================
+   演示数据声明
+   ==========================================================================
+   做成中性的信息条而不是警告条：这不是错误，只是要如实说明数据来源。
+   ========================================================================== */
+.demo {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 18px 20px;
-  background: #fff;
-  border: 1px solid var(--line);
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--info-line);
   border-radius: var(--r-md);
-  text-decoration: none;
-  color: inherit;
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  background: var(--info-bg);
 }
 
-.card--link:hover {
-  border-color: var(--brand-300);
-  box-shadow: 0 4px 12px rgb(64 158 255 / 12%);
-  transform: translateY(-1px);
-}
-
-.card--danger {
-  border-color: var(--danger-line);
-  background: var(--danger-bg);
-}
-
-.card--ok {
-  border-color: var(--brand-200);
-}
-
-.card__label {
-  font-size: 13px;
-  color: var(--ink-400);
-}
-
-.card__value {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin: 0;
-}
-
-.card__number {
-  font-size: 28px;
-  font-weight: 600;
-  line-height: 1.2;
-  color: var(--ink-800);
-  font-variant-numeric: tabular-nums;
-}
-
-.card--danger .card__number {
-  color: var(--danger);
-}
-
-.card__unit {
-  font-size: 13px;
-  color: var(--ink-400);
-}
-
-.card__hint {
-  font-size: 12px;
-  color: var(--ink-300);
-  overflow: hidden;
-  text-overflow: ellipsis;
+.demo__tag {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: var(--r-xs);
+  background: var(--brand-700);
+  color: #fff;
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-medium);
+  line-height: 1.7;
   white-space: nowrap;
 }
 
-/* ---------- 分区 ---------- */
-.dash__section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.demo__text {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-loose);
+  color: var(--ink-600);
 }
 
-.dash__section-head {
+/* ==========================================================================
+   健康评分
+   ==========================================================================
+   整页最重要的一个数字。字号跟着令牌走：家属模式 34×1.9 ≈ 65px，
+   专业模式 24×1.9 ≈ 46px —— 一套写法两种密度。
+   ========================================================================== */
+.score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-8) var(--sp-5);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  /* 左侧一道色条表达风险等级。不用整块底色 —— 大面积的饱和色
+     会让页面显得惊惶，而这道条足够传达信息 */
+  border-left: 5px solid var(--line-strong);
+  border-radius: var(--r-md);
+  text-align: center;
+}
+
+/* 色条跟**评分**的等级，不跟风险。
+   这张卡讲的就是评分，旁边再摆一个绿色的 95 分和橙色的条，仍然别扭 ——
+   实测截图里确认过。风险由下面那个写明"本周风险"的角标表达。 */
+.score--green {
+  border-left-color: var(--ok);
+}
+
+.score--yellow {
+  border-left-color: var(--warn);
+}
+
+.score--red {
+  border-left-color: var(--danger);
+}
+
+.score__label {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-500);
+  letter-spacing: 0.5px;
+}
+
+.score__value {
   display: flex;
   align-items: baseline;
+  gap: var(--sp-2);
+  margin: 0;
+  line-height: 1;
+}
+
+.score__number {
+  font-family: var(--font-num);
+  font-size: calc(var(--fs-2xl) * 1.9);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -1px;
+}
+
+/* 数字的颜色跟着**评分自己的等级**走，不跟风险等级。
+   两者的区别见 lib/insight.ts 里 Insight.band 的注释 */
+.score__value--green .score__number {
+  color: var(--ok);
+}
+
+.score__value--yellow .score__number {
+  color: var(--warn);
+}
+
+.score__value--red .score__number {
+  color: var(--danger);
+}
+
+.score__value--empty {
+  color: var(--ink-200);
+  font-size: calc(var(--fs-2xl) * 1.2);
+  letter-spacing: 4px;
+}
+
+.score__unit {
+  font-size: var(--fs-lg);
+  color: var(--ink-400);
+}
+
+.score__risk {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+.score__risk-label {
+  font-size: var(--fs-xs);
+  color: var(--ink-400);
+}
+
+.score__headline {
+  margin: 0;
+  max-width: 34em;
+  font-size: var(--fs-md);
+  line-height: var(--lh-base);
+  color: var(--ink-700);
+}
+
+.score__cta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+
+/* 触控目标 ≥44px —— WCAG 2.1 AA。家属里老年用户多，
+   手指定位精度本来就差一些 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--sp-5);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-700);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  text-decoration: none;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.btn:hover {
+  background: var(--surface-sunken);
+  text-decoration: none;
+}
+
+.btn--primary {
+  background: var(--brand-700);
+  border-color: var(--brand-700);
+  color: #fff;
+}
+
+.btn--primary:hover {
+  background: var(--brand-800);
+}
+
+/* ==========================================================================
+   三张家属语言卡片
+   ========================================================================== */
+.cards {
+  display: grid;
+  /* 手机一列、宽屏三列。家属大概率用手机，一屏一个重点是刻意的 */
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--sp-4);
+}
+
+.fcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-5);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.fcard__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.fcard__icon {
+  font-size: var(--fs-lg);
+  line-height: 1;
+}
+
+.fcard__title {
+  flex: 1;
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--ink-500);
+}
+
+.fcard__headline {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-base);
+  color: var(--ink-800);
+}
+
+.fcard__detail {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-base);
+  color: var(--ink-400);
+}
+
+/* 红黄两档给整张卡一道左色条。绿档不给 —— 一切都好时不需要被强调 */
+.fcard--yellow {
+  border-left: 4px solid var(--warn);
+}
+
+.fcard--red {
+  border-left: 4px solid var(--danger);
+}
+
+/* ==========================================================================
+   折叠：详细数据
+   ========================================================================== */
+.detail {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.detail__toggle {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
+  width: 100%;
+  /* 44px 触控下限 */
+  min-height: 52px;
+  padding: 0 var(--sp-5);
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--brand-700);
+  cursor: pointer;
+  text-align: left;
 }
 
-.dash__section-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+.detail__toggle:hover {
+  background: var(--brand-50);
+}
+
+.detail__chevron {
+  display: inline-block;
+  font-size: var(--fs-md);
+  color: var(--ink-300);
+  transition: transform 0.2s;
+}
+
+.detail__chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.detail__body {
+  padding: var(--sp-2) var(--sp-5) var(--sp-5);
+  border-top: 1px solid var(--line-soft);
+}
+
+.detail__title {
+  margin: var(--sp-4) 0 var(--sp-2);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
   color: var(--ink-800);
 }
 
-.dash__more {
-  font-size: 13px;
-  color: var(--brand-700);
-  text-decoration: none;
-}
-
-.dash__more:hover {
-  text-decoration: underline;
-}
-
-/* ---------- 性能指标 ---------- */
-.metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-}
-
-.metric {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 14px 16px;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-}
-
-.metric--highlight {
-  border-color: var(--brand-200);
-  background: linear-gradient(180deg, var(--brand-50) 0%, var(--surface) 100%);
-}
-
-.metric__label {
-  font-size: 12px;
+.detail__note {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-loose);
   color: var(--ink-400);
 }
 
-.metric__value {
+.detail__footnote {
+  margin: var(--sp-4) 0 0;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-loose);
+  color: var(--ink-400);
+}
+
+.detail__link {
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--brand-700);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---------- 评分构成 ---------- */
+.parts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.part__head {
   display: flex;
   align-items: baseline;
-  gap: 4px;
+  gap: var(--sp-2);
+  margin-bottom: 5px;
+}
+
+.part__label {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--ink-700);
+}
+
+.part__weight {
+  padding: 1px 6px;
+  border-radius: var(--r-xs);
+  background: var(--surface-sunken);
+  font-size: var(--fs-micro);
+  color: var(--ink-400);
+}
+
+.part__score {
+  margin-left: auto;
+  font-family: var(--font-num);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--ink-800);
+}
+
+.part__bar {
+  height: 8px;
+  border-radius: var(--r-full);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.part__fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-full);
+  background: var(--brand-500);
+  transition: width 0.3s;
+}
+
+.part__detail {
+  margin: 5px 0 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-base);
+  color: var(--ink-400);
+}
+
+/* ---------- 技术指标 ---------- */
+.tech {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-4);
   margin: 0;
 }
 
-.metric__number {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--ink-800);
-  font-variant-numeric: tabular-nums;
+.tech__item {
+  padding: var(--sp-3);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
 }
 
-.metric--highlight .metric__number {
-  color: var(--brand-800);
+.tech__label {
+  font-size: var(--fs-xs);
+  color: var(--ink-500);
 }
 
-.metric__unit {
-  font-size: 12px;
-  color: var(--ink-400);
-}
-
-.metric__note {
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--ink-300);
-}
-
-/* ---------- 快速入口 ---------- */
-.entries {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-}
-
-.entry {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 16px 18px;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  text-decoration: none;
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
-}
-
-.entry:hover {
-  border-color: var(--brand-300);
-  box-shadow: 0 4px 12px rgb(64 158 255 / 12%);
-  transform: translateY(-1px);
-}
-
-.entry__title {
-  font-size: 14px;
-  font-weight: 500;
+.tech__value {
+  margin: 3px 0 0;
+  font-family: var(--font-num);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
   color: var(--ink-800);
 }
 
-.entry__detail {
-  font-size: 12px;
-  line-height: 1.6;
+.tech__unit {
+  margin-left: 3px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-normal);
   color: var(--ink-400);
+}
+
+.tech__note {
+  margin: 4px 0 0;
+  font-size: var(--fs-micro);
+  line-height: var(--lh-base);
+  color: var(--ink-400);
+}
+
+/* ==========================================================================
+   窄屏
+   ========================================================================== */
+@media (max-width: 640px) {
+  .score {
+    padding: var(--sp-6) var(--sp-4);
+  }
+
+  .score__cta {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .btn {
+    width: 100%;
+  }
+
+  .cards {
+    /* 一屏一个重点：手机上不并排，强制一列 */
+    grid-template-columns: 1fr;
+  }
 }
 </style>
