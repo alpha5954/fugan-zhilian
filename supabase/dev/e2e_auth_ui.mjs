@@ -233,6 +233,47 @@ try {
     await page.close()
   }
 
+  // ========================================================================
+  console.log('\n--- 访客会话建失败之后必须还能重试 ---')
+  // ========================================================================
+  // 这里拦掉匿名登录接口，模拟一次网络抖动或 Supabase 的频率限制。
+  //
+  // 修之前：createGuestSession 出错时返回 false（不是抛异常），那个 false
+  // 被 guestPromise 永久缓存，于是**在整页刷新之前这个访客再也进不去** ——
+  // 每次跳转都拿到同一份缓存，一路弹回登录页，而且不再重试。
+  //
+  // 关键是第二次**不能在同一个页面里刷新**，否则测的是刷新之后的新状态，
+  // 而不是"同一份缓存有没有被清掉"。
+  {
+    const page = await browser.newPage()
+    let blocked = true
+    await page.route('**/auth/v1/signup**', (route) =>
+      blocked ? route.abort('failed') : route.continue(),
+    )
+
+    await page.goto('about:blank')
+    await page.goto(`${BASE}/monitor`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(2000)
+    const first = new URL(page.url()).pathname
+    check(
+      '匿名登录失败时退回登录页',
+      first.endsWith('/login'),
+      `停在 ${first}`,
+    )
+
+    blocked = false
+    await page.getByRole('link', { name: /返回应用/ }).click()
+    await page.waitForTimeout(3000)
+    const second = new URL(page.url()).pathname
+    check(
+      '网络恢复后不必刷新页面就能重试成功',
+      second.endsWith('/monitor'),
+      `停在 ${second}`,
+    )
+
+    await page.close()
+  }
+
   {
     // 反例：普通的 OAuth 回调（type 不是 recovery）不应该触发这道锁，
     // 否则一次误判就会把所有别的登录方式也锁死

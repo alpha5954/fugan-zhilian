@@ -192,7 +192,21 @@ export const useUserStore = defineStore('user', () => {
    */
   function ensureGuestSession(): Promise<boolean> {
     if (session.value) return Promise.resolve(true)
-    guestPromise ??= createGuestSession()
+
+    // ⚠️ 失败的结果**不能**留在 guestPromise 里。
+    //
+    // 这里原本是 `guestPromise ??= createGuestSession()`，看着没问题，实际是个
+    // 陷阱：createGuestSession 出错时返回 false 而不是抛异常，于是那个 false
+    // 被永久缓存下来。一次网络抖动（或者匿名登录撞到频率限制）之后，
+    // **这个访客在整页刷新之前再也进不去了** —— 之后每次跳转都拿到同一个
+    // 缓存下来的 false，被一路弹回登录页，而且不再重试。
+    //
+    // 实测遇到过：点击"返回应用"落回登录页，再点一次就成了，正是因为
+    // 第二次是全新的一次调用。
+    guestPromise ??= createGuestSession().then((ok) => {
+      if (!ok) guestPromise = null
+      return ok
+    })
     return guestPromise
   }
 

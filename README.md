@@ -153,7 +153,7 @@ npm run check:auth         # 认证回调识别、地址栏清理与错误码翻
 
 ### 认证相关的界面验证
 
-上面那些是纯逻辑断言，跑不到"用户点完邮件到底落在哪个页面"这种问题上。那部分由 `supabase/dev/e2e_auth_ui.mjs` 用 Playwright 驱动真实浏览器验证（31 项）：
+上面那些是纯逻辑断言，跑不到"用户点完邮件到底落在哪个页面"这种问题上。那部分由 `supabase/dev/e2e_auth_ui.mjs` 用 Playwright 驱动真实浏览器验证（33 项）：
 
 ```bash
 npm run dev                                     # 另开一个终端
@@ -300,6 +300,10 @@ supabase/
 **访客点「登录」会二次确认**：Supabase 的登录是替换会话，用已有账号登录后匿名账号的数据不会跟随。想保留数据必须走「保存账号」。
 
 ⚠️ 控制台需开启 **Anonymous Sign-ins**（Authentication → Sign In / Providers）。未开启时守卫退回登录页兜底。
+
+**建访客会话失败时不能缓存失败结果。** `ensureGuestSession()` 原本写的是 `guestPromise ??= createGuestSession()`，而 `createGuestSession()` 出错时返回 `false` 而不是抛异常 —— 那个 `false` 被永久缓存，于是**一次网络抖动或频率限制之后，这个访客在整页刷新之前再也进不去了**：之后每次跳转都拿到同一份缓存，一路弹回登录页，而且不再重试。
+
+失败时必须把 `guestPromise` 清掉。这条有专门的端到端用例（拦掉 `/auth/v1/signup` 模拟失败，再放开、在**同一个页面里**重试点一次）——反向验证过，改回旧写法该用例会失败。
 
 ### 找回密码
 
