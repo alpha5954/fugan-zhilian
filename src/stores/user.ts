@@ -29,6 +29,8 @@ export const useUserStore = defineStore('user', () => {
 
   /** init() 的进行中 Promise，用于幂等；不是响应式状态，所以用普通变量 */
   let initPromise: Promise<void> | null = null
+  /** 访客会话的建立过程，同样用于幂等 */
+  let guestPromise: Promise<boolean> | null = null
 
   // -------------------------------------------------------------------------
   // getters
@@ -46,6 +48,14 @@ export const useUserStore = defineStore('user', () => {
     const mail = email.value
     return mail ? mail.split('@')[0] : ''
   })
+
+  /**
+   * 当前是否处于访客模式。
+   *
+   * 匿名账号在数据库看来就是普通账号（有 uid、走同一套 RLS），区别只在
+   * auth.users.is_anonymous 这个标记。界面据此决定要不要提示「注册后可长期保存」。
+   */
+  const isGuest = computed(() => session.value?.user.is_anonymous === true)
 
   const isPatient = computed(() => role.value === 'patient')
   const isFamily = computed(() => role.value === 'family')
@@ -109,6 +119,97 @@ export const useUserStore = defineStore('user', () => {
 
     profile.value = data[0]
     return true
+  }
+
+  // -------------------------------------------------------------------------
+  // 访客模式
+  // -------------------------------------------------------------------------
+
+  /**
+   * 确保当前有一个会话：已有则直接返回，没有就**静默建一个匿名账号**。
+   *
+   * 为什么必须建：anon 角色在业务表上没有任何授权（迁移 2 刻意如此），
+   * 未登录访客查 rehab_sessions 之类会直接拿到 42501 permission denied。
+   * 匿名账号拿到的是正常的 authenticated 角色，既有 RLS 原样生效，
+   * 所以所有页面和数据层都不用为"访客"这个情况写任何分支。
+   *
+   * 幂等：路由守卫每次跳转都会调，用 guestPromise 保证只建一次。
+   */
+  function ensureGuestSession(): Promise<boolean> {
+    if (session.value) return Promise.resolve(true)
+    guestPromise ??= createGuestSession()
+    return guestPromise
+  }
+
+  async function createGuestSession(): Promise<boolean> {
+    loading.value = true
+    try {
+      const { data, error: err } = await supabase.auth.signInAnonymously({
+        // role 会被 handle_new_user 触发器读走写进 profiles。
+        // 匿名访客一律按患者建号 —— 治疗师/管理员必须后台提升，见迁移 1 的白名单
+        options: { data: { role: 'patient' } },
+      })
+      if (err) throw err
+
+      session.value = data.session
+      if (data.session) await fetchProfile()
+      initialized.value = true
+      return Boolean(data.session)
+    } catch (e) {
+      // 最常见的原因：控制台没开启 Anonymous Sign-ins。
+      // 守卫收到 false 会退回登录页，用户至少还能用系统
+      error.value = toMessage(e, '无法建立访客会话')
+      return false
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
+   * 把访客账号升级为正式账号（即"注册"）。
+   *
+   * ⚠️ 用的是 updateUser 而不是 signUp。前者作用在**当前这个匿名账号**上，
+   *    uid 不变，所以访客期间产生的一切（绑定的设备、保存的训练记录、
+   *    监护关系）原样保留。signUp 会新建一个账号，那些数据就成了孤儿 ——
+   *    这正是"登录后同步数据"要避免的。
+   */
+  async function upgradeGuest(
+    email: string,
+    password: string,
+    displayName?: string,
+  ): Promise<{ ok: boolean; pendingEmail: string | null }> {
+    error.value = null
+    loading.value = true
+    try {
+      const { data, error: err } = await supabase.auth.updateUser({
+        email: email.trim(),
+        password,
+        data: { display_name: displayName?.trim() || undefined },
+      })
+      if (err) throw err
+
+      // 若项目开启了邮箱确认，新邮箱处于待确认状态（user.new_email），
+      // 要点邮件里的链接才生效。此时不算失败，但要如实告诉用户去查邮件
+      const pendingEmail = data.user?.new_email ?? null
+
+      if (pendingEmail) {
+        return { ok: true, pendingEmail }
+      }
+
+      // 昵称要单独写入 profiles —— handle_new_user 只在**新建**用户时触发，
+      // 升级匿名账号不会触发它，所以 updateUser 的 metadata 到不了 profiles
+      if (displayName?.trim()) {
+        await updateProfile({ display_name: displayName.trim() })
+      }
+      await fetchProfile()
+
+      return { ok: true, pendingEmail: null }
+    } catch (e) {
+      error.value = toMessage(e, '保存账号失败')
+      return { ok: false, pendingEmail: null }
+    } finally {
+      loading.value = false
+    }
   }
 
   /**
@@ -205,8 +306,10 @@ export const useUserStore = defineStore('user', () => {
     session.value = null
     profile.value = null
     error.value = null
-    // initPromise 一并清空，登出后再调 init() 能重新初始化
+    // 两个 Promise 一并清空：登出后再调 init() / ensureGuestSession()
+    // 应当能重新走一遍，而不是拿到上一次的结果
     initPromise = null
+    guestPromise = null
     initialized.value = false
   }
 
@@ -261,6 +364,7 @@ export const useUserStore = defineStore('user', () => {
     initialized,
     // getters
     isLoggedIn,
+    isGuest,
     userId,
     email,
     role,
@@ -274,6 +378,8 @@ export const useUserStore = defineStore('user', () => {
     init,
     fetchProfile,
     updateProfile,
+    ensureGuestSession,
+    upgradeGuest,
     signIn,
     signUp,
     signOut,

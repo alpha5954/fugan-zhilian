@@ -60,6 +60,19 @@ docker exec fugan-pgtest psql -U postgres -d postgres \
 | `e2e_devices.py` | 设备管理页的链路：绑定 → 解绑 → 重新认领的闭环，以及认领 RPC 的全部边界 |
 | `care_links_test.sql` | 监护关系的权限边界（本地）。含「家属不能自行变更关系类型」等 6 项 |
 | `e2e_care_links.py` | 监护关系端到端（真实环境）：33 项断言，覆盖三方（患者/家属/无关用户）的完整流程 |
+| `e2e_guest_mode.mjs` | 访客模式关键路径：匿名登录 → 建档 → 普通 RLS 通道 → **升级后 uid 与数据保留** |
+
+> `e2e_guest_mode.mjs` 用 Node 而非 Python，因为要验的正是 supabase-js 客户端的行为（`signInAnonymously` / `updateUser`），手写 HTTP 请求测不出这一层。
+
+## 访客模式为什么这样设计
+
+访客不登录时，`anon` 角色在业务表上**没有任何授权**（迁移 2 刻意 revoke 的），查任何业务表都会得到 `42501 permission denied`。
+
+所以「把路由守卫放开」是走不通的。做法是：访客首次进入时**静默建立一个匿名账号**，拿到正常的 `authenticated` 角色 —— 既有的 RLS、Store、页面**一行都不用为"访客"这个情况写分支**。
+
+「注册」用 `updateUser` 而不是 `signUp`：前者作用在当前这个匿名账号上，**uid 不变**，访客期间绑的设备、存的训练记录原样保留。这条承诺已由 `e2e_guest_mode.mjs` 实测验证（3 条带 ★ 的断言）。
+
+⚠️ 前置：控制台必须开启 **Anonymous Sign-ins**（Authentication → Sign In / Providers）。未开启时守卫会退回登录页作为兜底，不会白屏死循环。
 
 ## 两套测试的分工
 

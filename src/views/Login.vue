@@ -5,6 +5,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormItemRule } from 'element-plus'
 
 import { useUserStore } from '@/stores/user'
@@ -79,21 +80,67 @@ async function handleSubmit() {
 
   try {
     if (mode.value === 'signin') {
+      // ⚠️ 访客用已有账号登录会**替换掉当前会话**：匿名账号连同它里面的
+      //    数据会变成孤儿，不会跟随到新账号。这是最容易让人丢数据的操作，
+      //    必须先讲清楚再让用户决定。
+      if (user.isGuest) {
+        try {
+          await ElMessageBox.confirm(
+            '登录已有账号后，当前访客模式下的数据（绑定的设备、保存的训练记录）' +
+              '会留在临时账号里，不会跟随过来。\n\n' +
+              '想保留这些数据，请改用「保存账号」把当前访客账号升级为正式账号。',
+            '当前处于访客模式',
+            {
+              confirmButtonText: '仍要登录',
+              cancelButtonText: '返回',
+              type: 'warning',
+            },
+          )
+        } catch {
+          return // 用户选择返回
+        }
+      }
+
       if (await user.signIn(form.email, form.password)) {
         goAfterAuth()
       }
       return
     }
 
+    // ---- 注册 ----
+
+    // 访客走「升级当前账号」，uid 不变，数据完整保留
+    if (user.isGuest) {
+      const r = await user.upgradeGuest(
+        form.email,
+        form.password,
+        form.displayName,
+      )
+      if (!r.ok) return
+
+      if (r.pendingEmail) {
+        // 项目开启了邮箱确认：新邮箱处于待确认状态
+        notice.value =
+          `确认邮件已发送到 ${r.pendingEmail}，请点击邮件中的链接完成验证。` +
+          '验证前你仍可以访客身份继续使用，数据不会丢失。'
+        mode.value = 'signin'
+        return
+      }
+
+      ElMessage.success('账号已保存，访客期间的数据全部保留')
+      goAfterAuth()
+      return
+    }
+
+    // 非访客的常规注册（正常流程下走不到 —— 每个访客进来都已持有匿名会话，
+    // 但若控制台没开启匿名登录、用户从兜底路径来到这里，仍需要能注册）
     const result = await user.signUp(form.email, form.password, {
       displayName: form.displayName,
       role: form.role,
     })
-
     if (!result.ok) return
 
     if (result.needsEmailConfirmation) {
-      // 项目开启了邮箱确认，注册不会直接登录
       notice.value =
         `确认邮件已发送到 ${form.email}，请点击邮件中的链接完成验证，然后再登录。`
       form.password = ''
@@ -123,7 +170,13 @@ function goAfterAuth() {
   router.replace(target)
 }
 
-const submitLabel = computed(() => (mode.value === 'signin' ? '登录' : '注册'))
+const submitLabel = computed(() => {
+  if (mode.value === 'signin') return '登录'
+  return user.isGuest ? '保存账号' : '注册'
+})
+
+/** 访客模式下第二个标签不叫"注册" —— 那是升级当前账号，不是新建 */
+const signupTabLabel = computed(() => (user.isGuest ? '保存账号' : '注册'))
 </script>
 
 <template>
@@ -133,6 +186,21 @@ const submitLabel = computed(() => (mode.value === 'signin' ? '登录' : '注册
         <span class="login__brand-mark">复</span>
         <span class="login__brand-text">复感智联 · 智能评估系统</span>
       </div>
+
+      <!-- 访客提示：说清"保存账号"到底做了什么，否则用户会以为是新建一个号 -->
+      <el-alert
+        v-if="user.isGuest"
+        type="info"
+        :closable="false"
+        show-icon
+        class="login__guest"
+      >
+        <template #title>当前是访客模式</template>
+        <p class="login__guest-text">
+          你正在使用一个临时账号，数据已经存在云端，但换设备或清理浏览器后就找不回来了。
+          设置邮箱和密码即可把它变成正式账号 —— <strong>当前的所有数据都会保留</strong>。
+        </p>
+      </el-alert>
 
       <div class="login__tabs">
         <button
@@ -149,7 +217,7 @@ const submitLabel = computed(() => (mode.value === 'signin' ? '登录' : '注册
           :class="{ 'is-active': mode === 'signup' }"
           @click="mode = 'signup'"
         >
-          注册
+          {{ signupTabLabel }}
         </button>
       </div>
 
@@ -217,7 +285,9 @@ const submitLabel = computed(() => (mode.value === 'signin' ? '登录' : '注册
           />
         </el-form-item>
 
-        <el-form-item v-if="mode === 'signup'" label="身份">
+        <!-- 访客升级不选身份：匿名账号建号时已按 patient 建档，
+             角色不由这里决定。要改身份走后台提升 -->
+        <el-form-item v-if="mode === 'signup' && !user.isGuest" label="身份">
           <el-radio-group v-model="form.role" :disabled="submitting">
             <el-radio value="patient">患者</el-radio>
             <el-radio value="family">家属</el-radio>
@@ -332,6 +402,25 @@ const submitLabel = computed(() => (mode.value === 'signin' ? '登录' : '注册
 
 .login__alert {
   margin-bottom: 16px;
+}
+
+.login__guest {
+  margin-bottom: 16px;
+}
+
+.login__guest :deep(.el-alert__content) {
+  width: 100%;
+}
+
+.login__guest-text {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.75;
+  color: #606266;
+}
+
+.login__guest-text strong {
+  color: #303133;
 }
 
 .login__field-hint {

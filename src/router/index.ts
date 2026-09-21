@@ -43,7 +43,10 @@ const routes: RouteRecordRaw[] = [
     path: '/',
     component: DefaultLayout,
     children: [
-      { path: '', redirect: { name: 'dashboard' } },
+      // 落地页是实时监测而不是概览：它由模拟器驱动、不依赖任何历史数据，
+      // 访客一进来就能看到四路曲线在动。概览对访客来说是四张空卡片，
+      // 作为第一印象太弱。
+      { path: '', redirect: { name: 'monitor' } },
 
       {
         path: 'dashboard',
@@ -141,17 +144,29 @@ router.beforeEach(async (to) => {
 
   const isPublic = to.meta.public === true
 
-  // 未登录访问受保护的页面 → 去登录页，并记下原本要去哪
+  // 未登录访问受保护页面 → **静默建立一个访客会话**，而不是踢去登录页。
+  //
+  // 为什么必须先建会话、不能直接放行：anon 角色在业务表上没有任何授权
+  // （迁移 2 里刻意 revoke 掉的），直接放行的话每个数据页面都会拿到
+  // 42501 permission denied，满屏报错。
+  //
+  // 匿名账号拿到的是正常的 authenticated 角色，既有 RLS 原样生效，
+  // 所以所有页面和数据层都不用为"访客"写任何分支。
   if (!isPublic && !user.isLoggedIn) {
-    return {
-      name: 'login',
-      query: { redirect: to.fullPath },
+    const ok = await user.ensureGuestSession()
+    if (!ok) {
+      // 建不出来时的兜底，最常见的原因是控制台没开启 Anonymous Sign-ins。
+      // 退回登录页，用户至少还能用系统
+      return { name: 'login', query: { redirect: to.fullPath } }
     }
   }
 
-  // 已登录却想访问登录页 → 送回首页
-  if (to.meta.guestOnly && user.isLoggedIn) {
-    return { name: 'dashboard' }
+  // 已登录却想访问登录页 → 送回首页。
+  //
+  // ⚠️ 只拦**正式账号**。现在每个访客都持有匿名会话，如果不排除访客，
+  //    访客点导航栏的「登录 / 注册」会被立刻弹走，永远进不了登录页。
+  if (to.meta.guestOnly && user.isLoggedIn && !user.isGuest) {
+    return { name: 'monitor' }
   }
 
   // 角色限制。
@@ -160,7 +175,7 @@ router.beforeEach(async (to) => {
   // 该看到的自然看得到，不该看到的会被 RLS 挡掉。
   const allowed = to.meta.roles
   if (allowed?.length && user.role && !allowed.includes(user.role)) {
-    return { name: 'dashboard' }
+    return { name: 'monitor' }
   }
 
   return true

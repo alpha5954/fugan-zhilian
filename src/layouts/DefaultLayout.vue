@@ -2,7 +2,7 @@
 // ============================================================================
 // 默认布局 —— 顶部导航栏 + 主内容区
 // ============================================================================
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
 import { useAlertStore } from '@/stores/alert'
@@ -17,6 +17,20 @@ const alerts = useAlertStore()
 const care = useCareStore()
 
 const careBadge = computed(() => care.pendingCount)
+
+/**
+ * 访客提示条是否已被关闭。
+ *
+ * 记在 localStorage 里：布局在路由切换之间不会重新挂载，但整页刷新会，
+ * 只用内存状态的话用户每次刷新都会再看到一遍，很烦。
+ */
+const GUEST_TIP_KEY = 'fugan:guest-tip-dismissed'
+const guestTipDismissed = ref(localStorage.getItem(GUEST_TIP_KEY) === '1')
+
+function dismissGuestTip() {
+  guestTipDismissed.value = true
+  localStorage.setItem(GUEST_TIP_KEY, '1')
+}
 
 // 在布局层拉一次监护关系 —— 角标和"正在查看谁"的提示条都要用，
 // 放到各页面里拉会导致切页面时角标闪烁
@@ -99,19 +113,25 @@ async function handleCommand(command: string) {
       </nav>
 
       <div class="layout__actions">
-        <el-dropdown v-if="user.isLoggedIn" @command="handleCommand">
-          <span class="layout__user">
-            <span class="layout__user-name">{{ user.displayName }}</span>
-            <el-tag size="small" type="info">{{ roleLabel }}</el-tag>
-          </span>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="signout">退出登录</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <!-- 访客不显示用户下拉：他们没有"退出登录"的概念，
+             需要的是把当前账号保存下来 -->
+        <template v-if="user.isLoggedIn && !user.isGuest">
+          <el-dropdown @command="handleCommand">
+            <span class="layout__user">
+              <span class="layout__user-name">{{ user.displayName }}</span>
+              <el-tag size="small" type="info">{{ roleLabel }}</el-tag>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="signout">退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </template>
 
-        <RouterLink v-else to="/login" class="layout__nav-link">登录</RouterLink>
+        <RouterLink v-else to="/login" class="layout__cta">
+          {{ user.isGuest ? '登录 / 注册' : '登录' }}
+        </RouterLink>
       </div>
     </header>
 
@@ -119,6 +139,25 @@ async function handleCommand(command: string) {
       <!-- 家属正在查看他人数据时的常驻提示。
            没有这条的话，用户很容易把监护对象的指标当成自己的看，
            尤其在两张表长得一模一样的情况下。 -->
+      <!-- 访客提示。数据已经在云端（匿名账号），说清这一点比说"注册"更有说服力 -->
+      <el-alert
+        v-if="user.isGuest && !guestTipDismissed"
+        type="info"
+        show-icon
+        class="guest-tip"
+        @close="dismissGuestTip"
+      >
+        <template #title>访客模式</template>
+        <p class="guest-tip__text">
+          你可以直接使用全部功能，数据已存在云端。但当前是临时账号，
+          换设备或清理浏览器后就找不回来了 ——
+          <RouterLink to="/login" class="guest-tip__link">
+            设置邮箱密码保存账号
+          </RouterLink>
+          ，此前的数据会全部保留。
+        </p>
+      </el-alert>
+
       <div v-if="care.isViewingOther" class="viewing">
         <span class="viewing__text">
           正在查看 <strong>{{ care.activePatientName }}</strong> 的数据
@@ -227,6 +266,49 @@ async function handleCommand(command: string) {
 
 .layout__actions {
   flex-shrink: 0;
+}
+
+/* 访客的登录/注册入口做成按钮样式，比普通导航链接更显眼 —— 它是访客
+   在这个页面上最该被引导去做的动作 */
+.layout__cta {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: #409eff;
+  color: #fff;
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 0.15s;
+}
+
+.layout__cta:hover {
+  background: #2b7de9;
+}
+
+/* ---------- 访客提示条 ---------- */
+.guest-tip {
+  margin-bottom: 16px;
+}
+
+.guest-tip :deep(.el-alert__content) {
+  width: 100%;
+}
+
+.guest-tip__text {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.guest-tip__link {
+  color: #409eff;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.guest-tip__link:hover {
+  text-decoration: underline;
 }
 
 .layout__user {
