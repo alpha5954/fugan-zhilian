@@ -121,7 +121,25 @@ export function authRedirectBase(): string {
   return `${window.location.origin}${import.meta.env.BASE_URL}`
 }
 
-/** 重置密码邮件的回跳地址：直接落在设置新密码的页面上 */
+/**
+ * 重置密码邮件的回跳地址。
+ *
+ * ⚠️ 这里回的是**站点根目录**，不是 `/reset-password`，看着绕，但必须如此。
+ *
+ * GitHub Pages 是静态托管，`/fugan-zhilian/reset-password` 这样的深链接
+ * 并没有对应文件，Pages 会用 404.html 兜底 —— **HTTP 状态码是 404**。
+ * 桌面浏览器照常渲染，但邮件客户端的内置浏览器（QQ 邮箱、163 邮箱那些）
+ * 拿到 404 往往直接弹自己的错误页，不渲染内容。
+ *
+ * 而这时候令牌**已经被消费掉了**：邮件链接指向的是 Supabase 的
+ * /auth/v1/verify，那一步就把一次性令牌用掉了，之后才 302 到我们这儿。
+ * 于是用户看到的是"在邮箱里打开报错，转到浏览器就显示失效" ——
+ * 一次点击废掉一封邮件。这个问题实际发生过。
+ *
+ * 指向根目录（`/fugan-zhilian/`）返回的是 200，谁都能正常渲染。
+ * 路径信息本来就不重要：识别恢复流程靠的是 URL 里的 hash
+ * （见 parseAuthCallback），落地之后路由守卫会把用户送到设置新密码页。
+ */
 export function passwordResetRedirect(): string {
-  return `${authRedirectBase()}reset-password`
+  return authRedirectBase()
 }

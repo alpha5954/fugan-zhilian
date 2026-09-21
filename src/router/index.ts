@@ -191,7 +191,10 @@ router.beforeEach(async (to) => {
   //
   // 放在恢复模式那道锁**之后**：那种情况下 router 会重新拼一个不带 hash 的
   // 地址，hash 自然就没了，不必多绕一次重定向。
-  if (to.hash && consumeAuthHashFlag()) {
+  // 先取标记再看 hash，顺序不能反：恢复模式那道锁会先返回，
+  // 第二次进来时 hash 已经是空的，若把它写在前面就永远取不掉标记，
+  // 这个标记会一直挂着，日后某个带 # 锚点的跳转会被莫名剥掉
+  if (consumeAuthHashFlag() && to.hash) {
     return { path: to.path, query: to.query, hash: '', replace: true }
   }
 

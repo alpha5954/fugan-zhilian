@@ -500,8 +500,12 @@ const needsEmailConfirmation = computed(
       </button>
     </el-form>
 
+    <!-- 进来之后总要能出去。这个页面是导航栏那个「登录 / 注册」按钮送进来的，
+         没有返回入口的话，改主意的访客就只剩关标签页这一条路 -->
     <p class="foot">
-      <RouterLink to="/about">先看看项目介绍 →</RouterLink>
+      <RouterLink to="/monitor">← 返回应用</RouterLink>
+      <span class="foot__sep">·</span>
+      <RouterLink to="/about">项目介绍</RouterLink>
     </p>
   </AuthShell>
 </template>
@@ -696,5 +700,10 @@ const needsEmailConfirmation = computed(
 
 .foot a:hover {
   color: var(--brand-700);
+}
+
+.foot__sep {
+  margin: 0 var(--sp-2);
+  color: var(--ink-200);
 }
 </style>

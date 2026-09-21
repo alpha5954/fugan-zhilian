@@ -195,6 +195,30 @@ try {
   }
 
   {
+    // 邮件链接回的是**站点根目录**，不是 /reset-password。
+    // 原因：GitHub Pages 对深链接返回 HTTP 404，邮件客户端的内置浏览器
+    // 拿到 404 常常直接弹自己的错误页 —— 而令牌在 302 到我们这儿之前
+    // 就已经被 Supabase 消费掉了，一次点击就废掉一封邮件。
+    // 根目录返回 200，谁都能渲染；剩下的路由守卫会接手。
+    const page = await browser.newPage()
+    const { finalPath, hash } = await visit(
+      page,
+      '/#access_token=fake.token.value&refresh_token=fake&type=recovery',
+    )
+    check(
+      '从站点根目录进来也能被改送到设置新密码页',
+      finalPath.endsWith('/reset-password'),
+      `最终停在 ${finalPath}`,
+    )
+    check(
+      '根目录落地后 hash 也清掉了',
+      hash === '' || hash === '#',
+      `地址栏残留 ${hash}`,
+    )
+    await page.close()
+  }
+
+  {
     // 登录页也不能例外：恢复模式优先级高于 guestOnly
     const page = await browser.newPage()
     const { finalPath } = await visit(
