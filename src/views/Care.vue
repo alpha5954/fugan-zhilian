@@ -390,8 +390,8 @@ onMounted(() => {
   gap: 10px;
   padding: 16px 18px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .panel__title {
@@ -401,25 +401,25 @@ onMounted(() => {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .panel__desc {
   margin: 0;
   font-size: 13px;
   line-height: 1.7;
-  color: #606266;
+  color: var(--ink-600);
 }
 
 .panel__note {
   margin: 0;
   font-size: 12px;
   line-height: 1.7;
-  color: #a8abb2;
+  color: var(--ink-300);
 }
 
 .panel__note strong {
-  color: #909399;
+  color: var(--ink-400);
 }
 
 /* ---------- 邀请码 ---------- */
@@ -429,9 +429,9 @@ onMounted(() => {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #f0f5ff 0%, #f5faff 100%);
-  border: 1px dashed #a0cfff;
+  border-radius: var(--r-sm);
+  background: linear-gradient(135deg, var(--brand-50) 0%, var(--brand-100) 100%);
+  border: 1px dashed var(--brand-300);
 }
 
 .code__value {
@@ -439,7 +439,7 @@ onMounted(() => {
   font-size: 24px;
   font-weight: 600;
   letter-spacing: 4px;
-  color: #2b7de9;
+  color: var(--brand-800);
 }
 
 .code-input :deep(.el-input__inner) {
@@ -461,8 +461,8 @@ onMounted(() => {
   gap: 12px;
   flex-wrap: wrap;
   padding: 10px 12px;
-  border: 1px solid #f2f3f5;
-  border-radius: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
 }
 
 .row__main {
@@ -475,7 +475,7 @@ onMounted(() => {
 .row__name {
   font-size: 14px;
   font-weight: 500;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .row__actions {

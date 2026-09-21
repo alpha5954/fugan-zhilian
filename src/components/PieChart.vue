@@ -19,6 +19,7 @@ import { PieChart as EPieChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import * as echarts from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
+import { token } from '@/lib/theme'
 
 echarts.use([EPieChart, TooltipComponent, CanvasRenderer])
 
@@ -61,7 +62,7 @@ function buildOption() {
         label: {
           show: true,
           fontSize: 11,
-          color: '#606266',
+          color: token('--ink-600'),
           formatter: '{d}%',
         },
         labelLine: { length: 8, length2: 6 },

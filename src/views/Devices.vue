@@ -408,20 +408,20 @@ onMounted(loadDevices)
 .summary__item {
   padding: 14px 16px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .summary__label {
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .summary__value {
   margin: 6px 0 0;
   font-size: 20px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
   font-variant-numeric: tabular-nums;
 }
 
@@ -432,8 +432,8 @@ onMounted(loadDevices)
   gap: 12px;
   padding: 16px 18px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .panel__head {
@@ -448,7 +448,7 @@ onMounted(loadDevices)
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .panel__actions {
@@ -463,7 +463,7 @@ onMounted(loadDevices)
 }
 
 .muted {
-  color: #a8abb2;
+  color: var(--ink-300);
   font-size: 13px;
 }
 
@@ -477,29 +477,29 @@ onMounted(loadDevices)
   flex: 1;
   height: 6px;
   min-width: 40px;
-  border-radius: 3px;
-  background: #f2f3f5;
+  border-radius: var(--r-xs);
+  background: var(--line-soft);
   overflow: hidden;
 }
 
 .battery__fill {
   height: 100%;
-  border-radius: 3px;
-  background: #67c23a;
+  border-radius: var(--r-xs);
+  background: var(--ok);
   transition: width 0.3s;
 }
 
 .battery__fill--mid {
-  background: #e6a23c;
+  background: var(--warn);
 }
 
 .battery__fill--low {
-  background: #f56c6c;
+  background: var(--danger);
 }
 
 .battery__text {
   font-size: 12px;
-  color: #606266;
+  color: var(--ink-600);
   font-variant-numeric: tabular-nums;
 }
 
@@ -508,13 +508,13 @@ onMounted(loadDevices)
   margin: 0;
   font-size: 12px;
   line-height: 1.7;
-  color: #a8abb2;
+  color: var(--ink-300);
 }
 
 .field-hint {
   margin: 6px 0 0;
   font-size: 12px;
   line-height: 1.6;
-  color: #909399;
+  color: var(--ink-400);
 }
 </style>

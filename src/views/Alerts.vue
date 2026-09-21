@@ -306,29 +306,29 @@ watch(() => care.viewingPatientId, load)
 .summary__item {
   padding: 14px 16px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .summary__item--alert {
-  border-color: #fbc4c4;
-  background: #fef6f6;
+  border-color: var(--danger-line);
+  background: var(--danger-bg);
 }
 
 .summary__item--alert .summary__value {
-  color: #f56c6c;
+  color: var(--danger);
 }
 
 .summary__label {
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .summary__value {
   margin: 6px 0 0;
   font-size: 20px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
   font-variant-numeric: tabular-nums;
 }
 
@@ -340,8 +340,8 @@ watch(() => care.viewingPatientId, load)
   gap: 12px;
   padding: 12px 18px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .filterbar__spacer {
@@ -355,9 +355,9 @@ watch(() => care.viewingPatientId, load)
   gap: 8px;
   padding: 16px 18px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-left: 4px solid #c0c4cc;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--ink-200);
+  border-radius: var(--r-md);
 }
 
 .alert + .alert {
@@ -365,16 +365,16 @@ watch(() => care.viewingPatientId, load)
 }
 
 .alert--info {
-  border-left-color: #409eff;
+  border-left-color: var(--brand-700);
 }
 
 .alert--warning {
-  border-left-color: #e6a23c;
+  border-left-color: var(--warn);
 }
 
 .alert--critical {
-  border-left-color: #f56c6c;
-  background: #fffbfb;
+  border-left-color: var(--danger);
+  background: var(--danger-bg);
 }
 
 /* 已处理的整体弱化，让未处理的在列表里跳出来 */
@@ -392,7 +392,7 @@ watch(() => care.viewingPatientId, load)
 .alert__kind {
   font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .alert__spacer {
@@ -401,36 +401,36 @@ watch(() => care.viewingPatientId, load)
 
 .alert__time {
   font-size: 12px;
-  color: #a8abb2;
+  color: var(--ink-300);
 }
 
 .alert__message {
   margin: 0;
   font-size: 14px;
   line-height: 1.75;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .alert__value {
   margin: 0;
   font-size: 13px;
-  color: #606266;
+  color: var(--ink-600);
   font-variant-numeric: tabular-nums;
 }
 
 .alert__value strong {
-  color: #303133;
+  color: var(--ink-800);
   font-size: 15px;
 }
 
 .alert__advice {
   margin: 0;
   padding: 8px 12px;
-  border-radius: 6px;
-  background: #f7f8fa;
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
   font-size: 12px;
   line-height: 1.75;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .alert__actions {

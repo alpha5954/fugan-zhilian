@@ -14,6 +14,7 @@ import type { ChartAxis, ChartSeries } from '@/components/SignalChart.vue'
 import { useMonitor } from '@/composables/useMonitor'
 import type { MonitorScenario } from '@/lib/simulator'
 import { useDeviceStore } from '@/stores/device'
+import { token } from '@/lib/theme'
 
 const monitor = useMonitor()
 const devices = useDeviceStore()
@@ -88,38 +89,38 @@ const DECOUPLE_AXES: ChartAxis[] = [
 ]
 
 const emgChart = computed<ChartSeries[]>(() => [
-  { name: 'sEMG', data: emgSeries.value, color: '#409eff', width: 1 },
+  { name: 'sEMG', data: emgSeries.value, color: token('--brand-700'), width: 1 },
 ])
 
 const angleChart = computed<ChartSeries[]>(() => [
-  { name: '关节角度', data: angleSeries.value, color: '#67c23a', area: true, smooth: true },
+  { name: '关节角度', data: angleSeries.value, color: token('--ok'), area: true, smooth: true },
 ])
 
 const tempChart = computed<ChartSeries[]>(() => [
-  { name: '局部温度', data: tempSeries.value, color: '#f56c6c', width: 1.6, smooth: true },
+  { name: '局部温度', data: tempSeries.value, color: token('--danger'), width: 1.6, smooth: true },
 ])
 
 const decoupleChart = computed<ChartSeries[]>(() => [
-  { name: '原始信号', data: rawSeries.value, color: '#909399', width: 1.1 },
-  { name: '应变分量', data: strainSeries.value, color: '#409eff', width: 1.6 },
+  { name: '原始信号', data: rawSeries.value, color: token('--ink-400'), width: 1.1 },
+  { name: '应变分量', data: strainSeries.value, color: token('--brand-700'), width: 1.6 },
   {
     name: '温度分量',
     data: tempPartSeries.value,
-    color: '#e6a23c',
+    color: token('--warn'),
     width: 1.6,
     yAxisIndex: 1,
   },
 ])
 
 const tempMarkLines = computed(() => [
-  { value: tempThreshold, label: `预警 ${tempThreshold} °C`, color: '#f56c6c' },
+  { value: tempThreshold, label: `预警 ${tempThreshold} °C`, color: token('--danger') },
 ])
 
 /** 解耦图每个序列都带图例色块，其余图只有一条线不需要 */
 const decoupleLegend = [
-  { name: '原始信号', color: '#909399' },
-  { name: '应变分量', color: '#409eff' },
-  { name: '温度分量', color: '#e6a23c' },
+  { name: '原始信号', color: token('--ink-400') },
+  { name: '应变分量', color: token('--brand-700') },
+  { name: '温度分量', color: token('--warn') },
 ]
 
 </script>
@@ -302,8 +303,8 @@ const decoupleLegend = [
   gap: 20px;
   padding: 12px 18px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .statusbar__group {
@@ -319,18 +320,18 @@ const decoupleLegend = [
 }
 
 .statusbar__dot.is-live {
-  background: #67c23a;
+  background: var(--ok);
   box-shadow: 0 0 0 3px rgb(103 194 58 / 18%);
 }
 
 .statusbar__dot.is-idle {
-  background: #c0c4cc;
+  background: var(--ink-200);
 }
 
 .statusbar__divider {
   width: 1px;
   height: 20px;
-  background: #e4e7ed;
+  background: var(--line);
 }
 
 .statusbar__item {
@@ -341,12 +342,12 @@ const decoupleLegend = [
 
 .statusbar__label {
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .statusbar__value {
   font-size: 13px;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .statusbar__value--mono {
@@ -354,14 +355,14 @@ const decoupleLegend = [
 }
 
 .statusbar__value.is-alert {
-  color: #f56c6c;
+  color: var(--danger);
   font-weight: 600;
 }
 
 /* 信号丢失时显示的仍是最后一次可信读数，用弱化样式 + 括注说明，
    避免用户把它当成当前值 */
 .statusbar__value.is-stale {
-  color: #a8abb2;
+  color: var(--ink-300);
 }
 
 .statusbar__stale {
@@ -386,7 +387,7 @@ const decoupleLegend = [
 
 .controls__hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .controls__right {
@@ -413,8 +414,8 @@ const decoupleLegend = [
   gap: 8px;
   padding: 14px 16px 8px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .panel__head {
@@ -429,12 +430,12 @@ const decoupleLegend = [
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .panel__unit {
   font-size: 12px;
-  color: #a8abb2;
+  color: var(--ink-300);
 }
 
 .panel__legend {
@@ -447,13 +448,13 @@ const decoupleLegend = [
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .legend__dot {
   width: 8px;
   height: 8px;
-  border-radius: 2px;
+  border-radius: var(--r-xs);
 }
 
 /* ---------- 脚注 ---------- */
@@ -461,6 +462,6 @@ const decoupleLegend = [
   margin: 0;
   font-size: 12px;
   line-height: 1.7;
-  color: #a8abb2;
+  color: var(--ink-300);
 }
 </style>

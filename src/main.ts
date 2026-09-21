@@ -5,14 +5,23 @@ import App from './App.vue'
 import { installGlobalErrorHandlers } from './lib/errorHandlers'
 import router from './router'
 
-// 样式导入顺序要紧：先 Element Plus 再自己的全局样式，
-// 否则自定义规则会被组件库的默认样式盖掉。
+// ---------------------------------------------------------------------------
+// 样式导入顺序**不能改**，后面的覆盖前面的：
+//   1. tokens      —— 设计令牌，定义所有变量
+//   2. element     —— 用令牌覆盖 Element Plus 的主题变量
+//   3. style       —— 全局基础样式
 //
-// 这里**不再引入 element-plus/dist/index.css** —— 那是全量样式（355 KB）。
+// 页面级样式写在各自组件的 <style scoped> 里，一律引用 tokens 的变量，
+// 不写死颜色和尺寸。
+//
+// 注意这里**不引入 element-plus/dist/index.css**（那是全量样式 355 KB）。
 // 按需引入由 vite.config.ts 里两个 unplugin 插件完成：
 //   - 模板里用到的组件，样式随组件自动带入
 //   - 脚本里 import 的 ElMessage / ElMessageBox / ElNotification 同理
-// 中文语言包改由 App.vue 的 <el-config-provider> 提供（原先在这里 use 插件时传）
+// 中文语言包由 App.vue 的 <el-config-provider> 提供。
+// ---------------------------------------------------------------------------
+import './styles/tokens.css'
+import './styles/element.css'
 import './style.css'
 
 const app = createApp(App)

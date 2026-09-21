@@ -25,6 +25,7 @@ import { REHAB_EXERCISES } from '@/lib/assessment'
 import { formatDateTime } from '@/lib/format'
 import { useCareStore } from '@/stores/care'
 import { useSessionStore } from '@/stores/session'
+import { token } from '@/lib/theme'
 
 const sessions = useSessionStore()
 const care = useCareStore()
@@ -122,14 +123,14 @@ const compareSeries = computed<BarSeries[]>(() => [
   {
     name: '平均活动度',
     data: compare.value.avgRom,
-    color: '#409eff',
+    color: token('--brand-700'),
     showValue: true,
   },
   {
     // 目标值用浅色柱并排画，差距一眼可见 —— 比只画一条横线清楚
     name: '目标值',
     data: compare.value.targets,
-    color: '#dcdfe6',
+    color: token('--line-strong'),
   },
 ])
 
@@ -137,14 +138,14 @@ const temperatureSeries = computed<ChartSeries[]>(() => [
   {
     name: '皮温峰值',
     data: temperature.value.values,
-    color: '#f56c6c',
+    color: token('--danger'),
     smooth: true,
     width: 1.8,
   },
 ])
 
 const tempMarkLines = [
-  { value: TEMP_ALERT_THRESHOLD, label: `预警 ${TEMP_ALERT_THRESHOLD} °C`, color: '#f56c6c' },
+  { value: TEMP_ALERT_THRESHOLD, label: `预警 ${TEMP_ALERT_THRESHOLD} °C`, color: token('--danger') },
 ]
 
 /** 报告标题里的筛选条件描述，屏幕和打印都显示 */
@@ -375,8 +376,8 @@ onMounted(load)
   gap: 16px;
   padding: 12px 18px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .filterbar__item {
@@ -387,7 +388,7 @@ onMounted(load)
 
 .filterbar__label {
   font-size: 13px;
-  color: #909399;
+  color: var(--ink-400);
   white-space: nowrap;
 }
 
@@ -405,29 +406,29 @@ onMounted(load)
 .summary__item {
   padding: 14px 16px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .summary__item--alert {
-  border-color: #fbc4c4;
-  background: #fef6f6;
+  border-color: var(--danger-line);
+  background: var(--danger-bg);
 }
 
 .summary__item--alert .summary__value {
-  color: #f56c6c;
+  color: var(--danger);
 }
 
 .summary__label {
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .summary__value {
   margin: 6px 0 0;
   font-size: 20px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
   font-variant-numeric: tabular-nums;
 }
 
@@ -452,8 +453,8 @@ onMounted(load)
   gap: 8px;
   padding: 16px 18px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .panel--wide {
@@ -472,12 +473,12 @@ onMounted(load)
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .panel__unit {
   font-size: 12px;
-  color: #a8abb2;
+  color: var(--ink-300);
 }
 
 .panel__legend {
@@ -490,7 +491,7 @@ onMounted(load)
   margin: 0;
   font-size: 12px;
   line-height: 1.7;
-  color: #a8abb2;
+  color: var(--ink-300);
 }
 
 .legend {
@@ -504,13 +505,13 @@ onMounted(load)
   align-items: center;
   gap: 5px;
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .legend__dot {
   width: 8px;
   height: 8px;
-  border-radius: 2px;
+  border-radius: var(--r-xs);
 }
 
 /* ==========================================================================
@@ -529,7 +530,7 @@ onMounted(load)
   .report-head {
     display: block;
     padding-bottom: 8px;
-    border-bottom: 1px solid #dcdfe6;
+    border-bottom: 1px solid var(--line-strong);
   }
 
   .report-head__title {
@@ -561,7 +562,7 @@ onMounted(load)
   .summary__item,
   .panel {
     padding: 8px 10px;
-    border-color: #dcdfe6;
+    border-color: var(--line-strong);
     /* 图表和指标卡不允许跨页断开 */
     break-inside: avoid;
     page-break-inside: avoid;

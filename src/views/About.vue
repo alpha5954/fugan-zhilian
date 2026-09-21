@@ -175,18 +175,18 @@ const MODULE_STATUS = [
 /* ---------- 抬头 ---------- */
 .hero {
   padding: 28px 32px;
-  background: linear-gradient(135deg, #f0f5ff 0%, #fff 100%);
-  border: 1px solid #d9ecff;
-  border-radius: 12px;
+  background: linear-gradient(135deg, var(--brand-50) 0%, #fff 100%);
+  border: 1px solid var(--brand-200);
+  border-radius: var(--r-lg);
 }
 
 .hero__badge {
   display: inline-block;
   margin: 0 0 12px;
   padding: 3px 10px;
-  border-radius: 20px;
-  background: #ecf5ff;
-  color: #2b7de9;
+  border-radius: var(--r-full);
+  background: var(--brand-100);
+  color: var(--brand-800);
   font-size: 12px;
 }
 
@@ -195,20 +195,20 @@ const MODULE_STATUS = [
   font-size: 32px;
   font-weight: 700;
   letter-spacing: 2px;
-  color: #2b7de9;
+  color: var(--brand-800);
 }
 
 .hero__subtitle {
   margin: 8px 0 0;
   font-size: 15px;
-  color: #606266;
+  color: var(--ink-600);
 }
 
 .hero__desc {
   margin: 16px 0 0;
   font-size: 14px;
   line-height: 1.9;
-  color: #606266;
+  color: var(--ink-600);
 }
 
 .hero__meta {
@@ -217,18 +217,18 @@ const MODULE_STATUS = [
   gap: 16px;
   margin: 24px 0 0;
   padding-top: 20px;
-  border-top: 1px solid #d9ecff;
+  border-top: 1px solid var(--brand-200);
 }
 
 .hero__meta-item dt {
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .hero__meta-item dd {
   margin: 4px 0 0;
   font-size: 14px;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 /* ---------- 分区 ---------- */
@@ -241,10 +241,10 @@ const MODULE_STATUS = [
 .section__title {
   margin: 0;
   padding-left: 10px;
-  border-left: 3px solid #409eff;
+  border-left: 3px solid var(--brand-700);
   font-size: 18px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 /* ---------- 技术路线 ---------- */
@@ -257,22 +257,22 @@ const MODULE_STATUS = [
 .card {
   padding: 18px 20px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .card__title {
   margin: 0 0 8px;
   font-size: 15px;
   font-weight: 600;
-  color: #2b7de9;
+  color: var(--brand-800);
 }
 
 .card__detail {
   margin: 0;
   font-size: 13px;
   line-height: 1.8;
-  color: #606266;
+  color: var(--ink-600);
 }
 
 /* ---------- 性能指标 ---------- */
@@ -288,18 +288,18 @@ const MODULE_STATUS = [
   gap: 4px;
   padding: 14px 16px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .metric--highlight {
-  border-color: #d9ecff;
-  background: linear-gradient(180deg, #f5faff 0%, #fff 100%);
+  border-color: var(--brand-200);
+  background: linear-gradient(180deg, var(--brand-50) 0%, var(--surface) 100%);
 }
 
 .metric__label {
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .metric__value {
@@ -312,23 +312,23 @@ const MODULE_STATUS = [
 .metric__number {
   font-size: 20px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
   font-variant-numeric: tabular-nums;
 }
 
 .metric--highlight .metric__number {
-  color: #2b7de9;
+  color: var(--brand-800);
 }
 
 .metric__unit {
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .metric__note {
   font-size: 11px;
   line-height: 1.5;
-  color: #a8abb2;
+  color: var(--ink-300);
 }
 
 /* ---------- 应用场景 ---------- */
@@ -341,8 +341,8 @@ const MODULE_STATUS = [
 .scenario {
   padding: 16px 20px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .scenario__head {
@@ -356,14 +356,14 @@ const MODULE_STATUS = [
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .scenario__detail {
   margin: 8px 0 0;
   font-size: 13px;
   line-height: 1.85;
-  color: #606266;
+  color: var(--ink-600);
 }
 
 /* ---------- 说明 ---------- */
@@ -377,20 +377,20 @@ const MODULE_STATUS = [
   margin: 0;
   padding: 16px 20px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
   font-size: 13px;
   line-height: 1.9;
-  color: #606266;
+  color: var(--ink-600);
 }
 
 .note--warn {
-  border-color: #f5dab1;
-  background: #fdf8f0;
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
 }
 
 .note strong {
-  color: #303133;
+  color: var(--ink-800);
 }
 
 /* ---------- 状态表 ---------- */
@@ -398,8 +398,8 @@ const MODULE_STATUS = [
   width: 100%;
   border-collapse: collapse;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
   overflow: hidden;
 }
 
@@ -408,13 +408,13 @@ const MODULE_STATUS = [
   padding: 11px 16px;
   text-align: left;
   font-size: 13px;
-  border-bottom: 1px solid #f2f3f5;
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .status-table th {
   font-weight: 500;
-  color: #909399;
-  background: #fafafa;
+  color: var(--ink-400);
+  background: var(--surface-sunken);
 }
 
 .status-table tr:last-child td {
@@ -422,7 +422,7 @@ const MODULE_STATUS = [
 }
 
 .status-table .muted {
-  color: #909399;
+  color: var(--ink-400);
 }
 
 /* ---------- 入口 ---------- */
@@ -432,14 +432,14 @@ const MODULE_STATUS = [
   justify-content: center;
   gap: 12px;
   padding: 20px;
-  background: #f5f7fa;
-  border-radius: 10px;
+  background: var(--canvas);
+  border-radius: var(--r-md);
   font-size: 13px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .cta__link {
-  color: #409eff;
+  color: var(--brand-700);
   text-decoration: none;
 }
 

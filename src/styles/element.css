@@ -1,0 +1,256 @@
+/* ============================================================================
+   Element Plus 主题覆盖
+   ============================================================================
+   把组件库的默认皮肤换成项目自己的（见 tokens.css）。
+
+   Element Plus 2.x 的全部视觉参数都通过 CSS 变量暴露，所以绝大多数改动
+   只需重新赋值，**不用去改组件内部的类名** —— 那样做会在升级时全面崩掉。
+
+   改造前整个应用用的就是 EP 的默认值（#409eff / #909399 / #303133 /
+   #e4e7ed），这是"一看就是 AI 生成"的最主要原因：不是难看，
+   是没有任何属于项目的设计决策。
+   ============================================================================ */
+
+:root {
+  /* ---------------------------------------------------------------------
+     主色
+     --------------------------------------------------------------------- */
+  --el-color-primary: var(--brand-700);
+  --el-color-primary-rgb: 26, 77, 135;
+  --el-color-primary-light-3: var(--brand-600);
+  --el-color-primary-light-5: var(--brand-500);
+  --el-color-primary-light-7: var(--brand-300);
+  --el-color-primary-light-8: var(--brand-200);
+  --el-color-primary-light-9: var(--brand-100);
+  --el-color-primary-dark-2: var(--brand-800);
+
+  /* ---------------------------------------------------------------------
+     语义色
+     ---------------------------------------------------------------------
+     比 EP 默认值沉一档。默认的 #67c23a / #e6a23c / #f56c6c 是消费级配色，
+     放在医疗场景偏跳脱；深色在白底上对比度更好，也更像专业设备。
+     --------------------------------------------------------------------- */
+  --el-color-success: var(--ok);
+  --el-color-success-light-3: #3f8a64;
+  --el-color-success-light-5: #6aa886;
+  --el-color-success-light-7: #a5cbaf;
+  --el-color-success-light-8: var(--ok-line);
+  --el-color-success-light-9: var(--ok-bg);
+  --el-color-success-dark-2: #145236;
+
+  --el-color-warning: var(--warn);
+  --el-color-warning-light-3: #b57f4a;
+  --el-color-warning-light-5: #c99f77;
+  --el-color-warning-light-7: #dfc3a5;
+  --el-color-warning-light-8: var(--warn-line);
+  --el-color-warning-light-9: var(--warn-bg);
+  --el-color-warning-dark-2: #7a4716;
+
+  --el-color-danger: var(--danger);
+  --el-color-error: var(--danger);
+  --el-color-danger-light-3: #c05a5a;
+  --el-color-danger-light-5: #d08686;
+  --el-color-danger-light-7: #e0b0b0;
+  --el-color-danger-light-8: var(--danger-line);
+  --el-color-danger-light-9: var(--danger-bg);
+  --el-color-danger-dark-2: #861c1c;
+
+  --el-color-error-light-3: #c05a5a;
+  --el-color-error-light-5: #d08686;
+  --el-color-error-light-7: #e0b0b0;
+  --el-color-error-light-8: var(--danger-line);
+  --el-color-error-light-9: var(--danger-bg);
+  --el-color-error-dark-2: #861c1c;
+
+  --el-color-info: var(--ink-400);
+  --el-color-info-light-3: #9aa4b1;
+  --el-color-info-light-5: #b4bcc6;
+  --el-color-info-light-7: #ced4db;
+  --el-color-info-light-8: var(--line);
+  --el-color-info-light-9: var(--surface-sunken);
+  --el-color-info-dark-2: var(--ink-600);
+
+  /* ---------------------------------------------------------------------
+     文字
+     --------------------------------------------------------------------- */
+  --el-text-color-primary: var(--ink-800);
+  --el-text-color-regular: var(--ink-600);
+  --el-text-color-secondary: var(--ink-400);
+  --el-text-color-placeholder: var(--ink-300);
+  --el-text-color-disabled: var(--ink-200);
+
+  /* ---------------------------------------------------------------------
+     描边与填充
+     --------------------------------------------------------------------- */
+  --el-border-color: var(--line);
+  --el-border-color-light: var(--line-soft);
+  --el-border-color-lighter: var(--line-soft);
+  --el-border-color-extra-light: var(--line-soft);
+  --el-border-color-dark: var(--line-strong);
+  --el-border-color-darker: var(--line-strong);
+  --el-border-color-hover: var(--brand-400);
+
+  --el-fill-color: var(--surface-sunken);
+  --el-fill-color-light: var(--surface-sunken);
+  --el-fill-color-lighter: var(--surface-sunken);
+  --el-fill-color-extra-light: var(--surface);
+  --el-fill-color-blank: var(--surface);
+
+  --el-bg-color: var(--surface);
+  --el-bg-color-page: var(--canvas);
+  --el-bg-color-overlay: var(--surface);
+
+  --el-color-black: var(--ink-900);
+  --el-color-white: var(--surface);
+
+  /* ---------------------------------------------------------------------
+     形状与字号
+     --------------------------------------------------------------------- */
+  --el-border-radius-base: var(--r-sm);
+  --el-border-radius-small: var(--r-xs);
+  --el-border-radius-round: var(--r-full);
+
+  --el-font-size-base: var(--fs-sm);
+  --el-font-size-small: var(--fs-xs);
+  --el-font-size-large: var(--fs-md);
+  --el-font-size-extra-large: var(--fs-lg);
+
+  --el-font-family: var(--font-sans);
+
+  /* 阴影只给浮层 —— 面板之间用描边区分层级 */
+  --el-box-shadow: var(--shadow-md);
+  --el-box-shadow-light: var(--shadow-sm);
+  --el-box-shadow-lighter: var(--shadow-sm);
+  --el-box-shadow-dark: var(--shadow-lg);
+
+  /* 控件默认高度收一档，整体更紧凑 */
+  --el-component-size: 32px;
+  --el-component-size-small: 26px;
+  --el-component-size-large: 38px;
+}
+
+/* ==========================================================================
+   组件级微调
+   ==========================================================================
+   只改那些"看变量调不动"的地方。尽量少动，每加一条都是后续升级的成本。
+   ========================================================================== */
+
+/* ---------- 按钮 ---------- */
+.el-button {
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.2px;
+}
+
+/* 主按钮不用纯色块堆叠，稍微收一点视觉重量 */
+.el-button--primary {
+  box-shadow: none;
+}
+
+/* ---------- 输入类控件 ---------- */
+/* 默认的边框在密集表单里偏重，换成更淡的分隔线，聚焦时才用品牌色 */
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  box-shadow: 0 0 0 1px var(--line) inset;
+  transition: box-shadow 0.15s;
+}
+
+.el-input__wrapper:hover,
+.el-textarea__inner:hover,
+.el-select__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--line-strong) inset;
+}
+
+/* ---------- 表格 ---------- */
+/* 临床界面要的是可扫读，不是疏朗。行高压到 40px 左右 */
+.el-table {
+  font-size: var(--fs-sm);
+  --el-table-border-color: var(--line-soft);
+  --el-table-header-bg-color: var(--surface-sunken);
+  --el-table-header-text-color: var(--ink-500);
+  --el-table-row-hover-bg-color: var(--brand-50);
+}
+
+.el-table th.el-table__cell {
+  font-weight: var(--fw-medium);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.3px;
+}
+
+.el-table .el-table__cell {
+  padding: 9px 0;
+}
+
+/* 表头与内容之间用一条稍重的线，比 EP 默认的均匀网格更清爽 */
+.el-table th.el-table__cell {
+  border-bottom: 1px solid var(--line-strong) !important;
+}
+
+/* 去掉表格外围的边框 —— 它已经在外层面板里了，双层边框显得笨重 */
+.el-table--border::after,
+.el-table::before {
+  display: none;
+}
+
+/* ---------- 标签 ---------- */
+/* 默认标签圆角偏大且偏厚，收一下让它更像"标记"而不是"按钮" */
+.el-tag {
+  border-radius: var(--r-xs);
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.2px;
+}
+
+/* ---------- 浮层 ---------- */
+.el-dialog {
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.el-dialog__header {
+  padding: var(--sp-5) var(--sp-6) var(--sp-3);
+  margin-right: 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.el-dialog__title {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--ink-800);
+}
+
+.el-dialog__body {
+  padding: var(--sp-5) var(--sp-6);
+}
+
+.el-dialog__footer {
+  padding: var(--sp-3) var(--sp-6) var(--sp-5);
+}
+
+.el-message-box,
+.el-notification,
+.el-popper.is-light {
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+}
+
+.el-notification__title {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+/* ---------- 空状态 ---------- */
+.el-empty__description p {
+  font-size: var(--fs-sm);
+  color: var(--ink-400);
+}
+
+/* ---------- 结果页（错误边界用） ---------- */
+.el-result__title p {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+}
+
+/* ---------- 骨架屏 ---------- */
+.el-skeleton__item {
+  border-radius: var(--r-sm);
+}

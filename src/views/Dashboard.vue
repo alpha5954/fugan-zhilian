@@ -245,13 +245,13 @@ onMounted(reload)
   margin: 0;
   font-size: 22px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .dash__subtitle {
   margin: 6px 0 0;
   font-size: 13px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 /* ---------- 指标卡片 ---------- */
@@ -267,31 +267,31 @@ onMounted(reload)
   gap: 6px;
   padding: 18px 20px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
   text-decoration: none;
   color: inherit;
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 
 .card--link:hover {
-  border-color: #c6dfff;
+  border-color: var(--brand-300);
   box-shadow: 0 4px 12px rgb(64 158 255 / 12%);
   transform: translateY(-1px);
 }
 
 .card--danger {
-  border-color: #fbc4c4;
-  background: #fef6f6;
+  border-color: var(--danger-line);
+  background: var(--danger-bg);
 }
 
 .card--ok {
-  border-color: #d9ecff;
+  border-color: var(--brand-200);
 }
 
 .card__label {
   font-size: 13px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .card__value {
@@ -305,22 +305,22 @@ onMounted(reload)
   font-size: 28px;
   font-weight: 600;
   line-height: 1.2;
-  color: #303133;
+  color: var(--ink-800);
   font-variant-numeric: tabular-nums;
 }
 
 .card--danger .card__number {
-  color: #f56c6c;
+  color: var(--danger);
 }
 
 .card__unit {
   font-size: 13px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .card__hint {
   font-size: 12px;
-  color: #a8abb2;
+  color: var(--ink-300);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -343,12 +343,12 @@ onMounted(reload)
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .dash__more {
   font-size: 13px;
-  color: #409eff;
+  color: var(--brand-700);
   text-decoration: none;
 }
 
@@ -369,18 +369,18 @@ onMounted(reload)
   gap: 4px;
   padding: 14px 16px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .metric--highlight {
-  border-color: #d9ecff;
-  background: linear-gradient(180deg, #f5faff 0%, #fff 100%);
+  border-color: var(--brand-200);
+  background: linear-gradient(180deg, var(--brand-50) 0%, var(--surface) 100%);
 }
 
 .metric__label {
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .metric__value {
@@ -393,23 +393,23 @@ onMounted(reload)
 .metric__number {
   font-size: 20px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
   font-variant-numeric: tabular-nums;
 }
 
 .metric--highlight .metric__number {
-  color: #2b7de9;
+  color: var(--brand-800);
 }
 
 .metric__unit {
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .metric__note {
   font-size: 11px;
   line-height: 1.5;
-  color: #a8abb2;
+  color: var(--ink-300);
 }
 
 /* ---------- 快速入口 ---------- */
@@ -425,14 +425,14 @@ onMounted(reload)
   gap: 6px;
   padding: 16px 18px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
   text-decoration: none;
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 
 .entry:hover {
-  border-color: #c6dfff;
+  border-color: var(--brand-300);
   box-shadow: 0 4px 12px rgb(64 158 255 / 12%);
   transform: translateY(-1px);
 }
@@ -440,12 +440,12 @@ onMounted(reload)
 .entry__title {
   font-size: 14px;
   font-weight: 500;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .entry__detail {
   font-size: 12px;
   line-height: 1.6;
-  color: #909399;
+  color: var(--ink-400);
 }
 </style>

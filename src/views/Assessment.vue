@@ -26,6 +26,7 @@ import { useDeviceStore } from '@/stores/device'
 import { useSessionStore } from '@/stores/session'
 import { useUserStore } from '@/stores/user'
 import type { JointName, RehabSessionInsert } from '@/types'
+import { token } from '@/lib/theme'
 
 const user = useUserStore()
 const care = useCareStore()
@@ -87,7 +88,7 @@ const rmsChart = computed<BarSeries[]>(() => [
   {
     name: '肌电 RMS',
     data: (result.value?.reps ?? []).map((r) => Number(r.rms.toFixed(3))),
-    color: '#409eff',
+    color: token('--brand-700'),
   },
 ])
 
@@ -101,14 +102,14 @@ const romChart = computed<BarSeries[]>(() => {
   const last = previous.value?.rom_deg ?? null
 
   if (last === null) {
-    return [{ name: '关节活动度', data: [Number(current.toFixed(1))], color: '#67c23a', showValue: true }]
+    return [{ name: '关节活动度', data: [Number(current.toFixed(1))], color: token('--ok'), showValue: true }]
   }
   return [
     {
       name: '关节活动度',
       data: [Number(current.toFixed(1)), Number(last.toFixed(1))],
       // 本次绿、上次灰 —— 一眼看出进步还是退步
-      color: ['#67c23a', '#c0c4cc'],
+      color: [token('--ok'), token('--ink-200')],
       showValue: true,
     },
   ]
@@ -123,7 +124,7 @@ const romXData = computed(() =>
 const romMarkLines = computed(() => {
   const r = result.value
   if (!r || r.metric !== 'rom') return []
-  return [{ value: r.target, label: `目标 ${r.target}°`, color: '#e6a23c' }]
+  return [{ value: r.target, label: `目标 ${r.target}°`, color: token('--warn') }]
 })
 
 /** 静力动作的活动度图只是参考，标题要说明 */
@@ -441,11 +442,11 @@ watch(() => care.viewingPatientId, loadHistory)
 
           <div class="phase-legend">
             <span class="phase-legend__item">
-              <span class="phase-legend__dot" style="background: #e6a23c" />
+              <span class="phase-legend__dot" style="background: var(--warn)" />
               向心期（角度增大）
             </span>
             <span class="phase-legend__item">
-              <span class="phase-legend__dot" style="background: #409eff" />
+              <span class="phase-legend__dot" style="background: var(--brand-700)" />
               离心期（角度减小）
             </span>
           </div>
@@ -557,15 +558,15 @@ watch(() => care.viewingPatientId, loadHistory)
   gap: 12px;
   padding: 16px 18px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .panel__title {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .panel__title--sm {
@@ -581,20 +582,20 @@ watch(() => care.viewingPatientId, loadHistory)
 
 .panel__unit {
   font-size: 12px;
-  color: #a8abb2;
+  color: var(--ink-300);
 }
 
 .panel__note {
   margin: 0;
   font-size: 12px;
   line-height: 1.7;
-  color: #a8abb2;
+  color: var(--ink-300);
 }
 
 .panel__note code {
   padding: 1px 4px;
-  border-radius: 3px;
-  background: #f5f7fa;
+  border-radius: var(--r-xs);
+  background: var(--canvas);
 }
 
 .panel__actions {
@@ -614,7 +615,7 @@ watch(() => care.viewingPatientId, loadHistory)
   margin: 6px 0 0;
   font-size: 12px;
   line-height: 1.6;
-  color: #e6a23c;
+  color: var(--warn);
 }
 
 .saved-tip {
@@ -637,19 +638,19 @@ watch(() => care.viewingPatientId, loadHistory)
 
 .recognize__label {
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .recognize__value {
   margin: 4px 0 2px;
   font-size: 26px;
   font-weight: 600;
-  color: #2b7de9;
+  color: var(--brand-800);
 }
 
 .recognize__conf {
   font-size: 13px;
-  color: #606266;
+  color: var(--ink-600);
   font-variant-numeric: tabular-nums;
 }
 
@@ -657,7 +658,7 @@ watch(() => care.viewingPatientId, loadHistory)
   margin: 8px 0 0;
   font-size: 12px;
   line-height: 1.6;
-  color: #e6a23c;
+  color: var(--warn);
 }
 
 .recognize__bars {
@@ -672,11 +673,11 @@ watch(() => care.viewingPatientId, loadHistory)
   align-items: center;
   gap: 10px;
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .conf--top {
-  color: #303133;
+  color: var(--ink-800);
   font-weight: 500;
 }
 
@@ -686,20 +687,20 @@ watch(() => care.viewingPatientId, loadHistory)
 
 .conf__track {
   height: 8px;
-  border-radius: 4px;
-  background: #f2f3f5;
+  border-radius: var(--r-xs);
+  background: var(--line-soft);
   overflow: hidden;
 }
 
 .conf__fill {
   height: 100%;
-  border-radius: 4px;
-  background: #c0c4cc;
+  border-radius: var(--r-xs);
+  background: var(--ink-200);
   transition: width 0.3s;
 }
 
 .conf--top .conf__fill {
-  background: linear-gradient(90deg, #409eff, #2b7de9);
+  background: linear-gradient(90deg, var(--brand-700), var(--brand-800));
 }
 
 .conf__value {
@@ -717,25 +718,25 @@ watch(() => care.viewingPatientId, loadHistory)
 .summary__item {
   padding: 14px 16px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .summary__item--accent {
-  border-color: #f5dab1;
-  background: linear-gradient(180deg, #fdf8f0 0%, #fff 100%);
+  border-color: var(--warn-line);
+  background: linear-gradient(180deg, var(--warn-bg) 0%, #fff 100%);
 }
 
 .summary__label {
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .summary__value {
   margin: 6px 0 0;
   font-size: 20px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
   font-variant-numeric: tabular-nums;
 }
 
@@ -743,7 +744,7 @@ watch(() => care.viewingPatientId, loadHistory)
   margin-left: 3px;
   font-size: 12px;
   font-weight: 400;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 /* ---------- 图表 ---------- */
@@ -758,11 +759,11 @@ watch(() => care.viewingPatientId, loadHistory)
   margin: 0;
   font-size: 13px;
   line-height: 1.75;
-  color: #606266;
+  color: var(--ink-600);
 }
 
 .panel__desc strong {
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .phase-legend {
@@ -776,13 +777,13 @@ watch(() => care.viewingPatientId, loadHistory)
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .phase-legend__dot {
   width: 14px;
   height: 3px;
-  border-radius: 2px;
+  border-radius: var(--r-xs);
 }
 
 .phase-metrics {
@@ -793,31 +794,31 @@ watch(() => care.viewingPatientId, loadHistory)
 
 .phase-metric {
   padding: 12px 14px;
-  background: #fafafa;
-  border: 1px solid #f2f3f5;
-  border-radius: 8px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
 }
 
 /* 比值是这一节最核心的数字，单独高亮 */
 .phase-metric--accent {
-  border-color: #f5dab1;
-  background: #fdf8f0;
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
 }
 
 .phase-metric--accent .phase-metric__value {
-  color: #a06800;
+  color: var(--warn);
 }
 
 .phase-metric__label {
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .phase-metric__value {
   margin: 4px 0 0;
   font-size: 17px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
   font-variant-numeric: tabular-nums;
 }
 
@@ -825,33 +826,33 @@ watch(() => care.viewingPatientId, loadHistory)
   margin-left: 3px;
   font-size: 11px;
   font-weight: 400;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .phase-reading {
   margin: 0;
   padding: 12px 14px;
-  border-radius: 8px;
-  border-left: 3px solid #c0c4cc;
-  background: #fafafa;
+  border-radius: var(--r-sm);
+  border-left: 3px solid var(--ink-200);
+  background: var(--surface-sunken);
   font-size: 13px;
   line-height: 1.8;
-  color: #606266;
+  color: var(--ink-600);
 }
 
 .phase-reading--good {
-  border-left-color: #67c23a;
-  background: #f4faf0;
+  border-left-color: var(--ok);
+  background: var(--ok-bg);
 }
 
 .phase-reading--info {
-  border-left-color: #409eff;
-  background: #f2f8ff;
+  border-left-color: var(--brand-700);
+  background: var(--info-bg);
 }
 
 .phase-reading--warn {
-  border-left-color: #e6a23c;
-  background: #fdf8f0;
+  border-left-color: var(--warn);
+  background: var(--warn-bg);
 }
 
 /* ---------- 建议 ---------- */
@@ -863,36 +864,36 @@ watch(() => care.viewingPatientId, loadHistory)
 
 .advice__item {
   padding: 12px 14px;
-  border-radius: 8px;
-  border-left: 3px solid #c0c4cc;
-  background: #fafafa;
+  border-radius: var(--r-sm);
+  border-left: 3px solid var(--ink-200);
+  background: var(--surface-sunken);
 }
 
 .advice__item--good {
-  border-left-color: #67c23a;
-  background: #f4faf0;
+  border-left-color: var(--ok);
+  background: var(--ok-bg);
 }
 
 .advice__item--warn {
-  border-left-color: #e6a23c;
-  background: #fdf8f0;
+  border-left-color: var(--warn);
+  background: var(--warn-bg);
 }
 
 .advice__item--info {
-  border-left-color: #409eff;
-  background: #f2f8ff;
+  border-left-color: var(--brand-700);
+  background: var(--info-bg);
 }
 
 .advice__title {
   font-size: 13px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .advice__detail {
   margin: 4px 0 0;
   font-size: 13px;
   line-height: 1.7;
-  color: #606266;
+  color: var(--ink-600);
 }
 </style>

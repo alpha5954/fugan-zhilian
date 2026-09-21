@@ -330,7 +330,7 @@ const signupTabLabel = computed(() => (user.isGuest ? '保存账号' : '注册')
   min-height: 100vh;
   padding: 24px;
   box-sizing: border-box;
-  background: linear-gradient(135deg, #f0f5ff 0%, #f5f7fa 100%);
+  background: linear-gradient(135deg, var(--brand-50) 0%, var(--canvas) 100%);
 }
 
 .login__panel {
@@ -338,8 +338,8 @@ const signupTabLabel = computed(() => (user.isGuest ? '保存账号' : '注册')
   max-width: 400px;
   padding: 32px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
   box-shadow: 0 8px 24px rgb(0 0 0 / 6%);
 }
 
@@ -356,8 +356,8 @@ const signupTabLabel = computed(() => (user.isGuest ? '保存账号' : '注册')
   place-items: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #409eff, #2b7de9);
+  border-radius: var(--r-sm);
+  background: linear-gradient(135deg, var(--brand-700), var(--brand-800));
   color: #fff;
   font-weight: 600;
 }
@@ -365,7 +365,7 @@ const signupTabLabel = computed(() => (user.isGuest ? '保存账号' : '注册')
 .login__brand-text {
   font-size: 15px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .login__tabs {
@@ -373,29 +373,29 @@ const signupTabLabel = computed(() => (user.isGuest ? '保存账号' : '注册')
   gap: 4px;
   margin-bottom: 20px;
   padding: 3px;
-  border-radius: 8px;
-  background: #f5f7fa;
+  border-radius: var(--r-sm);
+  background: var(--canvas);
 }
 
 .login__tab {
   flex: 1;
   padding: 7px 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: transparent;
   font-size: 14px;
-  color: #606266;
+  color: var(--ink-600);
   cursor: pointer;
   transition: background-color 0.15s, color 0.15s;
 }
 
 .login__tab:hover {
-  color: #409eff;
+  color: var(--brand-700);
 }
 
 .login__tab.is-active {
   background: #fff;
-  color: #409eff;
+  color: var(--brand-700);
   font-weight: 500;
   box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
 }
@@ -416,18 +416,18 @@ const signupTabLabel = computed(() => (user.isGuest ? '保存账号' : '注册')
   margin: 6px 0 0;
   font-size: 12px;
   line-height: 1.75;
-  color: #606266;
+  color: var(--ink-600);
 }
 
 .login__guest-text strong {
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .login__field-hint {
   margin: 6px 0 0;
   font-size: 12px;
   line-height: 1.6;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .login__submit {
@@ -442,7 +442,7 @@ const signupTabLabel = computed(() => (user.isGuest ? '保存账号' : '注册')
 }
 
 .login__foot a {
-  color: #409eff;
+  color: var(--brand-700);
   text-decoration: none;
 }
 

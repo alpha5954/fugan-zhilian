@@ -73,32 +73,32 @@ async function copyDetail() {
   max-width: 520px;
   padding: 28px 32px;
   background: #fff;
-  border: 1px solid #fbc4c4;
-  border-radius: 12px;
+  border: 1px solid var(--danger-line);
+  border-radius: var(--r-lg);
 }
 
 .boundary__title {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: #f56c6c;
+  color: var(--danger);
 }
 
 .boundary__desc {
   margin: 10px 0 0;
   font-size: 13px;
   line-height: 1.8;
-  color: #606266;
+  color: var(--ink-600);
 }
 
 .boundary__detail {
   margin: 14px 0 0;
   padding: 10px 12px;
-  border-radius: 6px;
-  background: #fafafa;
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
   font-size: 12px;
   line-height: 1.6;
-  color: #909399;
+  color: var(--ink-400);
   white-space: pre-wrap;
   word-break: break-all;
   max-height: 120px;

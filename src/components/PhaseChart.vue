@@ -26,6 +26,7 @@ import {
 } from 'echarts/components'
 import * as echarts from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
+import { token } from '@/lib/theme'
 
 echarts.use([
   LineChart,
@@ -53,21 +54,23 @@ const el = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
 let observer: ResizeObserver | null = null
 
-const CONCENTRIC_COLOR = '#e6a23c'
-const ECCENTRIC_COLOR = '#409eff'
-
 function buildOption() {
+  // 在函数内部取色，不放到模块顶层 —— 按需引入的 CSS 是在模块求值之后
+  // 才注入的，顶层调用可能读到空字符串（详见 lib/theme.ts 的说明）
+  const concentricColor = token('--warn')
+  const eccentricColor = token('--brand-700')
+
   const series = [
     {
       type: 'line' as const,
       name: '向心期（角度增大）',
-      color: CONCENTRIC_COLOR,
+      color: concentricColor,
       data: props.concentric.map((p) => [p.angle, p.rms]),
     },
     {
       type: 'line' as const,
       name: '离心期（角度减小）',
-      color: ECCENTRIC_COLOR,
+      color: eccentricColor,
       data: props.eccentric.map((p) => [p.angle, p.rms]),
     },
   ].map((s) => ({
@@ -95,20 +98,20 @@ function buildOption() {
       name: '关节角度 (°)',
       nameLocation: 'middle' as const,
       nameGap: 26,
-      nameTextStyle: { color: '#909399', fontSize: 11 },
+      nameTextStyle: { color: token('--ink-400'), fontSize: 11 },
       min: 0,
-      axisLine: { lineStyle: { color: '#e4e7ed' } },
-      axisLabel: { color: '#a8abb2', fontSize: 10 },
-      splitLine: { lineStyle: { color: '#f7f8fa' } },
+      axisLine: { lineStyle: { color: token('--line') } },
+      axisLabel: { color: token('--ink-300'), fontSize: 10 },
+      splitLine: { lineStyle: { color: token('--line-soft') } },
     },
     yAxis: {
       type: 'value' as const,
       name: '肌电 RMS (mV)',
-      nameTextStyle: { color: '#909399', fontSize: 11 },
+      nameTextStyle: { color: token('--ink-400'), fontSize: 11 },
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: '#a8abb2', fontSize: 10 },
-      splitLine: { lineStyle: { color: '#f2f3f5' } },
+      axisLabel: { color: token('--ink-300'), fontSize: 10 },
+      splitLine: { lineStyle: { color: token('--line-soft') } },
     },
     series: series.map((s, i) => ({
       ...s,
@@ -122,10 +125,10 @@ function buildOption() {
               data: [
                 {
                   xAxis: props.peakAngle,
-                  lineStyle: { color: '#f56c6c', type: 'dashed' as const, width: 1 },
+                  lineStyle: { color: token('--danger'), type: 'dashed' as const, width: 1 },
                   label: {
                     formatter: `峰值 ${props.peakAngle}°`,
-                    color: '#f56c6c',
+                    color: token('--danger'),
                     fontSize: 10,
                     position: 'insideEndTop' as const,
                   },

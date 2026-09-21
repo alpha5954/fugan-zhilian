@@ -44,20 +44,20 @@ defineProps<{
   margin: 0;
   font-size: 20px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-800);
 }
 
 .placeholder__desc {
   margin: 6px 0 0;
   font-size: 13px;
-  color: #909399;
+  color: var(--ink-400);
 }
 
 .placeholder__body {
   padding: 24px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
 }
 
 .placeholder__todos {
@@ -65,8 +65,8 @@ defineProps<{
   padding-left: 20px;
   font-size: 13px;
   line-height: 2;
-  color: #606266;
-  border-top: 1px dashed #e4e7ed;
+  color: var(--ink-600);
+  border-top: 1px dashed var(--line);
   padding-top: 16px;
 }
 </style>

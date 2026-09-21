@@ -54,6 +54,7 @@ import {
 } from 'echarts/components'
 import * as echarts from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
+import { token } from '@/lib/theme'
 
 echarts.use([
   LineChart,
@@ -113,24 +114,24 @@ function buildOption() {
       type: 'category',
       data: props.xData,
       boundaryGap: false,
-      axisLine: { lineStyle: { color: '#e4e7ed' } },
+      axisLine: { lineStyle: { color: token('--line') } },
       axisTick: { show: false },
-      axisLabel: { color: '#a8abb2', fontSize: 10, interval: 'auto' },
+      axisLabel: { color: token('--ink-300'), fontSize: 10, interval: 'auto' },
       splitLine: { show: false },
     },
     yAxis: axes.map((axis, i) => ({
       type: 'value' as const,
       name: axis.name,
-      nameTextStyle: { color: '#a8abb2', fontSize: 10 },
+      nameTextStyle: { color: token('--ink-300'), fontSize: 10 },
       position: axis.position ?? (i === 1 ? 'right' : 'left'),
       min: axis.min,
       max: axis.max,
       scale: axis.min === undefined,
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: '#a8abb2', fontSize: 10 },
+      axisLabel: { color: token('--ink-300'), fontSize: 10 },
       splitLine: {
-        lineStyle: { color: '#f2f3f5', type: i === 0 ? 'solid' : 'dashed' },
+        lineStyle: { color: token('--line-soft'), type: i === 0 ? 'solid' : 'dashed' },
       },
     })),
     series: props.series.map((s) => {

@@ -34,6 +34,7 @@ import {
 } from 'echarts/components'
 import * as echarts from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
+import { token } from '@/lib/theme'
 
 echarts.use([EBarChart, GridComponent, TooltipComponent, MarkLineComponent, CanvasRenderer])
 
@@ -86,20 +87,20 @@ function buildOption() {
     xAxis: {
       type: 'category',
       data: props.xData,
-      axisLine: { lineStyle: { color: '#e4e7ed' } },
+      axisLine: { lineStyle: { color: token('--line') } },
       axisTick: { show: false },
-      axisLabel: { color: '#909399', fontSize: 11 },
+      axisLabel: { color: token('--ink-400'), fontSize: 11 },
     },
     yAxis: {
       type: 'value',
       name: props.yName,
-      nameTextStyle: { color: '#a8abb2', fontSize: 10 },
+      nameTextStyle: { color: token('--ink-300'), fontSize: 10 },
       min: props.yMin,
       max: props.yMax,
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: '#a8abb2', fontSize: 10 },
-      splitLine: { lineStyle: { color: '#f2f3f5' } },
+      axisLabel: { color: token('--ink-300'), fontSize: 10 },
+      splitLine: { lineStyle: { color: token('--line-soft') } },
     },
     series: props.series.map((s, si) => ({
       type: 'bar' as const,
@@ -117,7 +118,7 @@ function buildOption() {
             show: true,
             position: 'top' as const,
             fontSize: 10,
-            color: '#909399',
+            color: token('--ink-400'),
             formatter: (p: { value: number }) => p.value.toFixed(props.digits),
           }
         : { show: false },

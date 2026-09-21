@@ -1,24 +1,15 @@
 /* ============================================================================
    全局基础样式
    ============================================================================
-   只放最基础的复位和排版。页面级样式写在各自组件的 <style scoped> 里，
-   避免全局样式越堆越多、互相覆盖。
+   只放复位、排版基线和少量真正的全局约定。页面级样式一律写在各自组件的
+   <style scoped> 里，避免全局样式越堆越多、互相覆盖。
+
+   颜色与尺寸全部引用 tokens.css 的变量，不在这里写死值。
    ============================================================================ */
 
-:root {
-  /* 中文优先的字体栈：先试系统中文字体，最后兜底到通用无衬线 */
-  font-family: 'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB',
-    'Helvetica Neue', Helvetica, Arial, sans-serif;
-  font-size: 14px;
-  line-height: 1.6;
-  color: #303133;
-  background-color: #f5f7fa;
-
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
@@ -30,6 +21,16 @@ body,
 
 body {
   margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+  color: var(--ink-600);
+  background: var(--canvas);
+
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* 中文在 Windows 上的默认渲染偏细，这个设置让笔画更均匀 */
+  text-rendering: optimizeLegibility;
 }
 
 h1,
@@ -41,19 +42,71 @@ p {
 }
 
 a {
-  color: #409eff;
+  color: var(--brand-700);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* 数字用等宽字形：表格列和指标卡里的数值才能竖向对齐。
+   这是"专业工具"观感的重要来源，成本极低。
+   注意只对数字生效，中文不受影响。 */
+.num,
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* 滚动条：默认的浅灰在密集界面里太抢眼，收细并与整体色调统一 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--ink-200);
+  border: 3px solid transparent;
+  border-radius: var(--r-full);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-300);
+  background-clip: content-box;
+  border: 3px solid transparent;
+}
+
+/* 焦点可见性：键盘操作时必须有清晰的焦点环（无障碍要求），
+   但鼠标点击时不显示 —— :focus-visible 正好是这个语义 */
+:focus-visible {
+  outline: 2px solid var(--brand-500);
+  outline-offset: 2px;
+}
+
+/* 尊重系统的"减少动态效果"设置 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* 打印为 PDF 时的页边距。
    @page 只在打印时生效，且必须是全局规则，写在 scoped 样式里无效。 */
 @page {
   margin: 12mm;
-}
-
-/* 数字类内容用等宽字体，表格里数值对齐才好看 */
-code,
-kbd,
-samp {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 0.9em;
 }

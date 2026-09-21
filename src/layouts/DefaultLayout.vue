@@ -2,6 +2,13 @@
 // ============================================================================
 // 默认布局 —— 顶部导航栏 + 主内容区
 // ============================================================================
+// 视觉上做了两处刻意选择，都是为了让界面不像"默认模板"：
+//
+//   1. 导航用**下划线指示当前项**，而不是填充色药丸。药丸高亮是后台模板的
+//      典型做法；下划线更像编辑类/工具类产品的语言，也更安静。
+//   2. 字号整体比 Element Plus 默认小一档、行距更紧。这是临床界面该有的
+//      密度 —— 医生和治疗师是每天使用的熟练用户，留白过多意味着更多滚动。
+// ============================================================================
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
@@ -16,42 +23,6 @@ const router = useRouter()
 const user = useUserStore()
 const alerts = useAlertStore()
 const care = useCareStore()
-
-const careBadge = computed(() => care.pendingCount)
-
-/**
- * 访客提示条是否已被关闭。
- *
- * 记在 localStorage 里：布局在路由切换之间不会重新挂载，但整页刷新会，
- * 只用内存状态的话用户每次刷新都会再看到一遍，很烦。
- */
-const GUEST_TIP_KEY = 'fugan:guest-tip-dismissed'
-const guestTipDismissed = ref(localStorage.getItem(GUEST_TIP_KEY) === '1')
-
-function dismissGuestTip() {
-  guestTipDismissed.value = true
-  localStorage.setItem(GUEST_TIP_KEY, '1')
-}
-
-// 在布局层拉一次监护关系 —— 角标和"正在查看谁"的提示条都要用，
-// 放到各页面里拉会导致切页面时角标闪烁
-onMounted(() => {
-  if (!user.isLoggedIn) return
-  if (!care.loaded) void care.fetchAll()
-  void alerts.fetchUnacknowledgedCount(care.activePatientId)
-})
-
-// 预警角标也要在布局层维护。
-//
-// 之前只有首页会调 fetchUnacknowledgedCount()，所以在其他页面上角标是
-// 过期的 —— 用户明明处理完预警了，切到别的页面红色角标还挂着。
-// 另外家属切换查看对象后也要重算，否则角标显示的是上一个对象的数量。
-watch(
-  () => care.viewingPatientId,
-  (pid) => {
-    void alerts.fetchUnacknowledgedCount(pid ?? user.userId ?? undefined)
-  },
-)
 
 /** 导航项。顺序即展示顺序 */
 const navItems = [
@@ -72,16 +43,44 @@ const ROLE_LABEL: Record<UserRole, string> = {
   admin: '管理员',
 }
 
-const roleLabel = computed(() =>
-  user.role ? ROLE_LABEL[user.role] : '未建档',
-)
+const roleLabel = computed(() => (user.role ? ROLE_LABEL[user.role] : '未建档'))
 
 // 未登录时（比如在公开的「关于」页）不显示主导航
 const showNav = computed(() => user.isLoggedIn)
 
-// 用精确总数而非按列表统计 —— 列表有 limit，行数一多就会少算。
-// 该值由首页挂载时调用 fetchUnacknowledgedCount() 填充。
 const alertBadge = computed(() => alerts.unacknowledgedTotal)
+const careBadge = computed(() => care.pendingCount)
+
+/**
+ * 访客提示条是否已被关闭。
+ *
+ * 记在 localStorage 里：布局在路由切换之间不会重新挂载，但整页刷新会，
+ * 只用内存状态的话用户每次刷新都会再看到一遍，很烦。
+ */
+const GUEST_TIP_KEY = 'fugan:guest-tip-dismissed'
+const guestTipDismissed = ref(localStorage.getItem(GUEST_TIP_KEY) === '1')
+
+function dismissGuestTip() {
+  guestTipDismissed.value = true
+  localStorage.setItem(GUEST_TIP_KEY, '1')
+}
+
+onMounted(() => {
+  if (!user.isLoggedIn) return
+  if (!care.loaded) void care.fetchAll()
+  void alerts.fetchUnacknowledgedCount(care.activePatientId)
+})
+
+// 预警角标也要在布局层维护。
+//
+// 之前只有首页会调 fetchUnacknowledgedCount()，所以在其他页面上角标是
+// 过期的 —— 用户明明处理完预警了，切到别的页面红色角标还挂着。
+watch(
+  () => care.viewingPatientId,
+  (pid) => {
+    void alerts.fetchUnacknowledgedCount(pid ?? user.userId ?? undefined)
+  },
+)
 
 /** 当前标签高亮。用前缀匹配，这样 /analysis/123 这种子路由也能正确点亮 */
 function isActive(path: string): boolean {
@@ -98,44 +97,43 @@ async function handleCommand(command: string) {
 
 <template>
   <div class="layout">
-    <header class="layout__header">
-      <RouterLink to="/dashboard" class="layout__brand">
-        <span class="layout__brand-mark">复</span>
-        <span class="layout__brand-text">复感智联 · 智能评估系统</span>
+    <header class="topbar">
+      <RouterLink to="/dashboard" class="brand">
+        <img src="/logo.jpg" alt="" class="brand__mark" />
+        <span class="brand__name">复感智联</span>
+        <span class="brand__divider" />
+        <span class="brand__sub">智能评估系统</span>
       </RouterLink>
 
-      <nav v-if="showNav" class="layout__nav">
+      <nav v-if="showNav" class="nav">
         <RouterLink
           v-for="item in navItems"
           :key="item.path"
           :to="item.path"
-          class="layout__nav-link"
+          class="nav__link"
           :class="{ 'is-active': isActive(item.path) }"
         >
           {{ item.label }}
           <span
             v-if="item.path === '/alerts' && alertBadge > 0"
-            class="layout__badge"
+            class="nav__badge"
           >
             {{ alertBadge > 99 ? '99+' : alertBadge }}
           </span>
-          <span
-            v-if="item.path === '/care' && careBadge > 0"
-            class="layout__badge"
-          >
+          <span v-if="item.path === '/care' && careBadge > 0" class="nav__badge">
             {{ careBadge }}
           </span>
         </RouterLink>
       </nav>
 
-      <div class="layout__actions">
+      <div class="topbar__right">
         <!-- 访客不显示用户下拉：他们没有"退出登录"的概念，
              需要的是把当前账号保存下来 -->
         <template v-if="user.isLoggedIn && !user.isGuest">
           <el-dropdown @command="handleCommand">
-            <span class="layout__user">
-              <span class="layout__user-name">{{ user.displayName }}</span>
-              <el-tag size="small" type="info">{{ roleLabel }}</el-tag>
+            <span class="account">
+              <span class="account__name">{{ user.displayName }}</span>
+              <span class="account__role">{{ roleLabel }}</span>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
@@ -145,16 +143,13 @@ async function handleCommand(command: string) {
           </el-dropdown>
         </template>
 
-        <RouterLink v-else to="/login" class="layout__cta">
+        <RouterLink v-else to="/login" class="cta">
           {{ user.isGuest ? '登录 / 注册' : '登录' }}
         </RouterLink>
       </div>
     </header>
 
-    <main class="layout__main">
-      <!-- 家属正在查看他人数据时的常驻提示。
-           没有这条的话，用户很容易把监护对象的指标当成自己的看，
-           尤其在两张表长得一模一样的情况下。 -->
+    <main class="main">
       <!-- 访客提示。数据已经在云端（匿名账号），说清这一点比说"注册"更有说服力 -->
       <el-alert
         v-if="user.isGuest && !guestTipDismissed"
@@ -174,6 +169,9 @@ async function handleCommand(command: string) {
         </p>
       </el-alert>
 
+      <!-- 家属正在查看他人数据时的常驻提示。
+           没有这条的话，用户很容易把监护对象的指标当成自己的看，
+           尤其在两张表长得一模一样的情况下。 -->
       <div v-if="care.isViewingOther" class="viewing">
         <span class="viewing__text">
           正在查看 <strong>{{ care.activePatientName }}</strong> 的数据
@@ -198,118 +196,196 @@ async function handleCommand(command: string) {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: #f5f7fa;
+  background: var(--canvas);
 }
 
-.layout__header {
+/* ==========================================================================
+   顶栏
+   ========================================================================== */
+.topbar {
   display: flex;
   align-items: center;
-  gap: 32px;
-  height: 60px;
-  padding: 0 24px;
-  background: #fff;
-  border-bottom: 1px solid #e4e7ed;
-  /* 导航栏常驻顶部，内容滚动时不跟着走 */
+  gap: var(--sp-6);
+  height: var(--header-h);
+  padding: 0 var(--sp-5);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
   position: sticky;
   top: 0;
   z-index: 100;
 }
 
-.layout__brand {
+/* ---------- 品牌 ---------- */
+.brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  text-decoration: none;
-  color: inherit;
+  gap: var(--sp-2);
   flex-shrink: 0;
+  text-decoration: none;
 }
 
-.layout__brand-mark {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #409eff, #2b7de9);
-  color: #fff;
-  font-weight: 600;
+.brand:hover {
+  text-decoration: none;
 }
 
-.layout__brand-text {
-  font-size: 15px;
-  font-weight: 600;
-  color: #303133;
-  white-space: nowrap;
+.brand__mark {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  /* logo 是白底方图，用圆角让它更像一个"标识"而不是贴上去的图片 */
+  border-radius: var(--r-sm);
 }
 
-.layout__nav {
+.brand__name {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--ink-800);
+  letter-spacing: 0.5px;
+}
+
+.brand__divider {
+  width: 1px;
+  height: 12px;
+  background: var(--line-strong);
+}
+
+.brand__sub {
+  font-size: var(--fs-xs);
+  color: var(--ink-400);
+  letter-spacing: 0.3px;
+}
+
+/* ---------- 导航 ----------
+   下划线指示，不用填充药丸。
+   药丸高亮是后台模板的典型做法；下划线更安静，也更像工具类产品。 */
+.nav {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   flex: 1;
+  height: 100%;
   overflow-x: auto;
+  scrollbar-width: none;
 }
 
-.layout__nav-link {
+.nav::-webkit-scrollbar {
+  display: none;
+}
+
+.nav__link {
   position: relative;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 14px;
-  color: #606266;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 100%;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--ink-500);
   text-decoration: none;
   white-space: nowrap;
-  transition: background-color 0.15s, color 0.15s;
+  transition: color 0.15s;
 }
 
-.layout__nav-link:hover {
-  background: #f2f6fc;
-  color: #409eff;
+.nav__link:hover {
+  color: var(--ink-800);
+  text-decoration: none;
 }
 
-.layout__nav-link.is-active {
-  background: #ecf5ff;
-  color: #409eff;
-  font-weight: 500;
+.nav__link.is-active {
+  color: var(--brand-700);
+  font-weight: var(--fw-medium);
 }
 
-.layout__badge {
+/* 指示条贴在顶栏下沿。用 ::after 而不是 border-bottom，
+   是因为要控制它的宽度和出现方式 */
+.nav__link::after {
+  content: '';
+  position: absolute;
+  left: var(--sp-3);
+  right: var(--sp-3);
+  bottom: -1px;
+  height: 2px;
+  background: transparent;
+  transition: background-color 0.15s;
+}
+
+.nav__link.is-active::after {
+  background: var(--brand-700);
+}
+
+.nav__badge {
   display: inline-block;
   min-width: 16px;
-  margin-left: 6px;
   padding: 0 5px;
-  border-radius: 8px;
-  background: #f56c6c;
+  border-radius: var(--r-full);
+  background: var(--danger);
   color: #fff;
-  font-size: 11px;
+  font-size: var(--fs-micro);
   line-height: 16px;
+  font-weight: var(--fw-medium);
   text-align: center;
 }
 
-.layout__actions {
+/* ---------- 右侧区 ---------- */
+.topbar__right {
   flex-shrink: 0;
+  margin-left: auto;
 }
 
-/* 访客的登录/注册入口做成按钮样式，比普通导航链接更显眼 —— 它是访客
-   在这个页面上最该被引导去做的动作 */
-.layout__cta {
+.account {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  cursor: pointer;
+  outline: none;
+}
+
+.account__name {
+  font-size: var(--fs-sm);
+  color: var(--ink-700);
+  font-weight: var(--fw-medium);
+}
+
+.account__role {
+  font-size: var(--fs-micro);
+  color: var(--ink-400);
+}
+
+/* 访客的登录/注册入口做成按钮样式，比普通导航链接更显眼 ——
+   它是访客在这个页面上最该被引导去做的动作 */
+.cta {
   display: inline-block;
-  padding: 6px 14px;
-  border-radius: 6px;
-  background: #409eff;
+  padding: 5px 14px;
+  border-radius: var(--r-sm);
+  background: var(--brand-700);
   color: #fff;
-  font-size: 13px;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
   text-decoration: none;
   white-space: nowrap;
   transition: background-color 0.15s;
 }
 
-.layout__cta:hover {
-  background: #2b7de9;
+.cta:hover {
+  background: var(--brand-800);
+  text-decoration: none;
+}
+
+/* ==========================================================================
+   主内容区
+   ========================================================================== */
+.main {
+  flex: 1;
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--sp-5);
 }
 
 /* ---------- 访客提示条 ---------- */
 .guest-tip {
-  margin-bottom: 16px;
+  margin-bottom: var(--sp-4);
+  border-radius: var(--r-md);
 }
 
 .guest-tip :deep(.el-alert__content) {
@@ -317,41 +393,14 @@ async function handleCommand(command: string) {
 }
 
 .guest-tip__text {
-  margin: 6px 0 0;
-  font-size: 13px;
-  line-height: 1.7;
+  margin: 4px 0 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-base);
 }
 
 .guest-tip__link {
-  color: #409eff;
-  font-weight: 500;
-  text-decoration: none;
-}
-
-.guest-tip__link:hover {
-  text-decoration: underline;
-}
-
-.layout__user {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  outline: none;
-}
-
-.layout__user-name {
-  font-size: 14px;
-  color: #606266;
-}
-
-.layout__main {
-  flex: 1;
-  padding: 24px;
-  max-width: 1400px;
-  width: 100%;
-  margin: 0 auto;
-  box-sizing: border-box;
+  color: var(--brand-700);
+  font-weight: var(--fw-medium);
 }
 
 /* ---------- 正在查看他人的提示条 ---------- */
@@ -359,67 +408,66 @@ async function handleCommand(command: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--sp-3);
   flex-wrap: wrap;
-  margin-bottom: 16px;
-  padding: 10px 16px;
-  border-radius: 8px;
-  border: 1px solid #f5dab1;
-  background: #fdf8f0;
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--warn-line);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--r-md);
+  background: var(--warn-bg);
 }
 
 .viewing__text {
-  font-size: 13px;
-  color: #a06800;
+  font-size: var(--fs-xs);
+  color: var(--warn);
 }
 
 .viewing__text strong {
-  color: #7a4f00;
+  font-weight: var(--fw-semibold);
 }
 
 /* ==========================================================================
    窄屏适配
    ==========================================================================
    顶部栏原本是「品牌 + 导航 + 用户区」挤在一行，375px 的手机上会互相
-   挤压。改成两行：第一行只留 logo 方块和用户区，导航换到第二行横向滚动。
-   品牌全称在小屏上省掉 —— 保住识别度的是那个色块，不是那串字。
+   挤压。改成两行：第一行只留 logo 和用户区，导航换到第二行横向滚动。
+   品牌全称在小屏上省掉 —— 保住识别度的是那个图形，不是那串字。
    ========================================================================== */
 @media (max-width: 768px) {
-  .layout__header {
+  .topbar {
     height: auto;
     flex-wrap: wrap;
-    gap: 8px 12px;
-    padding: 10px 14px;
+    gap: var(--sp-2) var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
   }
 
-  /* 只留 logo 色块，隐去全称 */
-  .layout__brand-text {
+  .brand__sub,
+  .brand__divider {
     display: none;
   }
 
-  .layout__nav {
-    /* 换行到第二行，占满整行 */
+  .nav {
     order: 3;
     flex: none;
     width: 100%;
-    gap: 2px;
+    height: 34px;
   }
 
-  .layout__nav-link {
-    /* 触摸目标从 32px 提到 36px，手指点得准一些 */
-    padding: 8px 12px;
+  .nav__link {
+    padding: 0 var(--sp-2);
   }
 
-  .layout__actions {
-    margin-left: auto;
+  .nav__link::after {
+    left: var(--sp-2);
+    right: var(--sp-2);
   }
 
-  .layout__main {
-    padding: 14px;
+  .main {
+    padding: var(--sp-3);
   }
 
-  .layout__user-name {
-    /* 用户区收窄，避免把 logo 挤走 */
+  .account__name {
     max-width: 96px;
     overflow: hidden;
     text-overflow: ellipsis;

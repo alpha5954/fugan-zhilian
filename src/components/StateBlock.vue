@@ -73,15 +73,15 @@ defineEmits<{ retry: [] }>()
 .state-block {
   padding: 16px 18px;
   background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .state-block__msg {
   margin: 4px 0 10px;
   font-size: 13px;
   line-height: 1.7;
-  color: #606266;
+  color: var(--ink-600);
 }
 
 /* el-alert 自带 padding，这里只补圆角与边框风格 */
