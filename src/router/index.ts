@@ -40,6 +40,21 @@ const routes: RouteRecordRaw[] = [
   },
 
   {
+    // 用户点重置密码邮件里的链接后落在这里。回跳地址由
+    // user.sendPasswordReset() 指定（见 lib/authRedirect.ts）。
+    path: '/reset-password',
+    name: 'reset-password',
+    component: () => import('@/views/ResetPassword.vue'),
+    // public：链接失效时用户手上根本没有会话，不能因为"没登录"就把他弹走 ——
+    // 那样他只会看到一个登录页，完全不知道邮件链接出了什么问题。
+    //
+    // ⚠️ 绝不能加 guestOnly。链接有效时用户是**登录状态**（那个会话正是点
+    //    邮件换来的），而 guestOnly 的判据是"已登录且不是访客"，加了就会被
+    //    当场弹回首页 —— 正好把这个页面废掉。
+    meta: { public: true, title: '设置新密码' },
+  },
+
+  {
     path: '/',
     component: DefaultLayout,
     children: [
@@ -146,6 +161,19 @@ router.beforeEach(async (to) => {
   // 表现为"一刷新就掉登录"。
   if (!user.initialized) {
     await user.init()
+  }
+
+  // -------------------------------------------------------------------------
+  // 重置密码流程：把用户**锁在**设置新密码的页面上
+  // -------------------------------------------------------------------------
+  //
+  // 从邮件链接进来时，用户手里是一个货真价实的登录会话（点邮件链接换来的）。
+  // 没有这道锁的话他会一路正常地进首页、逛各个页面，然后大概率再也想不起来
+  // 自己是来改密码的 —— 下次登录照样进不去，白折腾一趟。
+  //
+  // 放在最前面，公开页面（比如「关于」）也不放行：此刻该做的只有一件事。
+  if (user.recoveryMode && to.name !== 'reset-password') {
+    return { name: 'reset-password' }
   }
 
   const isPublic = to.meta.public === true

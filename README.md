@@ -111,7 +111,7 @@ npm run preview   # 本地预览构建产物
 
 推送到 `main` 即自动部署（`.github/workflows/deploy.yml`）。站点位于仓库名子路径下，因此 `vite.config.ts` 的 `base` 必须与此一致，**更换仓库名时需同步修改**，否则线上静态资源会全部 404。
 
-### 首次部署需要两步手动配置
+### 首次部署需要三步手动配置
 
 **1. 添加仓库 Secrets**（Settings → Secrets and variables → Actions）
 
@@ -126,6 +126,10 @@ npm run preview   # 本地预览构建产物
 
 不要选 "Deploy from a branch"，那个模式不会执行 `deploy.yml`。
 
+**3. 配置邮件回跳白名单**（Supabase 控制台 → Authentication → URL Configuration）
+
+Redirect URLs 加上线上地址与本地开发地址，Site URL 指向线上地址。**不配的话找回密码和注册确认邮件的链接都会跳到别处，而且不报错**——详见上面「找回密码」一节。
+
 ### 关于 404.html
 
 GitHub Pages 是静态托管，**不支持 SPA 回退**：直接访问 `/fugan-zhilian/analysis` 或在深链接上刷新，会因为找不到同名文件而返回 404。
@@ -137,14 +141,29 @@ GitHub Pages 是静态托管，**不支持 SPA 回退**：直接访问 `/fugan-z
 ## 逻辑自检
 
 ```bash
-npm run check              # 全部
+npm run check              # 全部（139 项）
 npm run check:simulator    # 信号模拟器的物理关系与信号丢失（17 项）
-npm run check:assessment   # 康复评估的指标计算与入库数据（40 项）
+npm run check:assessment   # 康复评估的指标计算与入库数据（52 项）
 npm run check:analysis     # 数据分析的聚合逻辑（28 项）
 npm run check:alerts       # 实时监测的预警判据（16 项）
+npm run check:auth         # 认证回调识别与错误码翻译（26 项）
 ```
 
-四个脚本都用 `node` 直接执行 `.ts`，靠的是 Node 22.6+ 的类型剥离，不需要额外装测试框架。
+五个脚本都用 `node` 直接执行 `.ts`，靠的是 Node 22.6+ 的类型剥离，不需要额外装测试框架。
+
+### 认证相关的界面验证
+
+上面那些是纯逻辑断言，跑不到"用户点完邮件到底落在哪个页面"这种问题上。那部分由 `supabase/dev/e2e_auth_ui.mjs` 用 Playwright 驱动真实浏览器验证（22 项）：
+
+```bash
+npm run dev                                     # 另开一个终端
+node supabase/dev/e2e_auth_ui.mjs               # 默认打 :4173 的 preview
+node supabase/dev/e2e_auth_ui.mjs http://localhost:5173/fugan-zhilian
+```
+
+需要 Playwright 与 Chromium（`npm i -D playwright && npx playwright install chromium`），因此**没有并入 `npm run check`** —— 其余自检脚本刻意做到零额外依赖。
+
+它验的是几件读代码读不准的事：恢复模式的"锁"有没有生效、三种失败情况是否各说各话、以及 `type` 不是 `recovery` 时会不会被误伤。
 
 ### 自检脚本本身也会出错
 
@@ -202,17 +221,20 @@ src/
 ├── router/index.ts      路由表与导航守卫
 ├── lib/
 │   ├── supabase.ts      客户端单例
-│   ├── errors.ts        PostgREST 错误对象转可读文案
+│   ├── authRedirect.ts  邮件回跳地址 + 恢复链接识别（必须是 main.ts 的第一个 import）
+│   ├── errors.ts        错误转可读中文（含认证错误码表）
 │   ├── format.ts        时间戳与数值格式化
 │   ├── simulator.ts     传感器信号模拟器
 │   └── assessment.ts    康复评估：会话生成与指标计算
-├── stores/              Pinia：user / device / session / alert
+├── stores/              Pinia：user / device / session / alert / care
 ├── composables/
 │   └── useMonitor.ts    实时监测的采样循环与滚动窗口
 ├── constants/project.ts 项目元信息与性能指标
 ├── layouts/             页面布局
-├── components/          SignalChart / BarChart / PagePlaceholder
-└── views/               七个页面
+├── components/          SignalChart / BarChart / PieChart / PhaseChart /
+│                        AuthShell / ErrorBoundary / StateBlock …
+├── styles/              tokens.css（设计令牌）+ element.css（组件库覆盖）
+└── views/               十个页面
 
 scripts/                 自检脚本（node 直接运行 .ts）
 supabase/
@@ -253,8 +275,9 @@ supabase/
 | 7 | 部署与保活 | ✅ |
 | 8 | 测试与修复 | ✅ |
 | 9 | 监护关系（家属远程查看） | ✅ |
+| 10 | 登录/注册完善：找回密码、错误中文化、视觉对齐设计系统 | ✅ |
 
-九个页面：概览、实时监测、**预警记录**、康复评估、数据分析、设备管理、监护管理、关于、登录。
+十个页面：概览、实时监测、**预警记录**、康复评估、数据分析、设备管理、监护管理、关于、登录、设置新密码。
 
 ### 预警记录
 
@@ -277,6 +300,46 @@ supabase/
 **访客点「登录」会二次确认**：Supabase 的登录是替换会话，用已有账号登录后匿名账号的数据不会跟随。想保留数据必须走「保存账号」。
 
 ⚠️ 控制台需开启 **Anonymous Sign-ins**（Authentication → Sign In / Providers）。未开启时守卫退回登录页兜底。
+
+### 找回密码
+
+流程：登录页点「忘记密码」→ 填邮箱 → 收到邮件 → 点链接 → 落在 `/<base>/reset-password` 设置新密码。
+
+改密码成功后会自动 `signOut({ scope: 'others' })`，**把其它设备上的会话一并作废**。改密码通常是因为原密码可能已经泄露，不作废旧会话的话攻击者手里那个还能继续用，改了等于没改。当前这台不受影响。
+
+⚠️ **必须先配 Redirect URLs，否则线上收不到邮件链接的效果。**
+
+Supabase 控制台 → Authentication → URL Configuration → Redirect URLs 里加上：
+
+```
+http://localhost:5173/fugan-zhilian/**
+http://localhost:4173/fugan-zhilian/**
+https://alpha5954.github.io/fugan-zhilian/**
+```
+
+**配错的失败是无声的。** 实测过 GoTrue 对不在白名单里的 `redirectTo` **不报错**，而是静默丢弃、改用站点的 Site URL —— 接口返回成功，前端也没有任何异常，只有用户点的邮件链接会跳到一个陌生的地址。
+
+（好在还有一层兜底：`authRedirect.ts` 认的是 URL 里的 hash，不管落在哪个路径上都能认出恢复链接并把人送去设置新密码页。所以只要**站点的 Site URL 本身指向本站**，即使白名单没配也能走通。但 Site URL 默认是 `http://localhost:3000`，用手机点邮件就废了——白名单还是要配。）
+
+实现上还有一个必须知道的坑，它决定了这个功能能不能工作：
+
+**① 不能靠 `PASSWORD_RECOVERY` 事件，要从 URL 里同步读。**
+
+Supabase 的恢复链接把令牌放在 hash 里（`#access_token=...&type=recovery`），SDK 解析完会把它清空。而 SDK 发出 `PASSWORD_RECOVERY` 事件用的是**一句裸的 `setTimeout(..., 0)`**，不进 initialize 的通知队列；`getSession()` 之后我们还跟着一次 `fetchProfile` 网络请求——等那之后再订阅，事件早发完了。用户会被当成普通登录送进首页，密码根本没改，而他以为自己改过了。
+
+所以 `lib/authRedirect.ts` 里对 URL 的解析放在**模块求值阶段**，而它必须是 `main.ts` 的**第一个 import**——排在 SDK 后面加载就读不到了。这条顺序约束在那个文件的开头写着，改的时候别挪。
+
+**② 守卫要把用户"锁"在设置新密码页上。**
+
+点完邮件那一刻，用户手里是一个货真价实的登录会话。没有这道锁的话他会一路正常地进首页、逛各个页面，然后大概率再也想不起来自己是来改密码的。锁在 `router/index.ts` 的最前面，公开页面也不放行。
+
+三种进不到表单的情况分开说，而不是统一一句"出错了"：**链接过期**（URL 带 `error_code`）、**令牌没换成会话**（可能被邮件客户端截断）、**直接敲地址**。前两种给出「重新申请一封」，第三种指回登录页。
+
+**③ 错误提示要翻译。**
+
+Supabase 的认证错误是英文的（`Invalid login credentials`），中文界面里只有报错冒英文，用户读不懂也不知道下一步干什么。`lib/errors.ts` 的 `authErrorInfo()` 按错误码翻成中文，并把码一起返回——因为 `email_not_confirmed` 需要界面额外给一个「重新发送确认邮件」的按钮，光提示"去验证邮箱"没有用。
+
+⚠️ 「如果该邮箱已注册，邮件已发出」——**措辞不能写成"邮件已发往 xxx"**。Supabase 对未注册的邮箱同样返回成功，这是刻意的反枚举设计，否则任何人都能拿这个接口试探哪些邮箱注册过。
 
 ### 监护关系（家属远程查看）
 

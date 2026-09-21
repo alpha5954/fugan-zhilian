@@ -10,7 +10,13 @@ import { computed, ref } from 'vue'
 
 import type { Session } from '@supabase/supabase-js'
 
-import { toMessage } from '@/lib/errors'
+import {
+  authLinkError,
+  authRedirectBase,
+  fromRecoveryLink,
+  passwordResetRedirect,
+} from '@/lib/authRedirect'
+import { authErrorInfo, toMessage } from '@/lib/errors'
 import { supabase } from '@/lib/supabase'
 import type { Profile, ProfileUpdate, UserRole } from '@/types'
 
@@ -23,9 +29,38 @@ export const useUserStore = defineStore('user', () => {
   /** profiles 表里对应的一行。有 session 不一定有 profile（触发器异常时会缺） */
   const profile = ref<Profile | null>(null)
   const loading = ref(false)
+  /**
+   * 最近一次失败的中文提示。
+   *
+   * 存的是**翻译过的**文案（见 lib/errors.ts 的 authErrorInfo），不是
+   * Supabase 的英文原文 —— 界面全中文，只有报错冒英文的话用户读不懂。
+   */
   const error = ref<string | null>(null)
+  /**
+   * 上面那条错误对应的错误码。
+   *
+   * 界面偶尔要针对某一类错误做额外动作，最典型的是 email_not_confirmed：
+   * 光提示"去验证邮箱"没用，得顺手给一个「重新发送确认邮件」的按钮。
+   * 只存文案的话，界面就只能去匹配字符串，太脆。
+   */
+  const errorCode = ref<string | null>(null)
   /** init() 是否已跑完 —— 路由守卫靠它区分"未登录"和"还没查完" */
   const initialized = ref(false)
+
+  /**
+   * 当前是否处在「从邮件链接进来重设密码」的流程里。
+   *
+   * 初始值来自模块加载时对 URL 的同步解析（lib/authRedirect.ts）。
+   * 一旦为 true，路由守卫会把用户**锁在设置新密码页**上：此刻手里握着的是
+   * 一个货真价实的登录会话，用户完全可以到处逛，然后永远想不起来设密码。
+   *
+   * 链接失效的情况（error_code 存在但没有令牌）不算 recoveryMode ——
+   * 那时根本没有会话，把用户锁在改密码页上会让他卡死。那种情况由
+   * 设置新密码页自己显示"链接已失效，请重新申请"。
+   */
+  const recoveryMode = ref(fromRecoveryLink)
+  /** 回跳链接自带的错误码（如 otp_expired），给设置新密码页显示用 */
+  const linkError = ref<string | null>(authLinkError)
 
   /** init() 的进行中 Promise，用于幂等；不是响应式状态，所以用普通变量 */
   let initPromise: Promise<void> | null = null
@@ -66,6 +101,26 @@ export const useUserStore = defineStore('user', () => {
   const isCaregiver = computed(() => isFamily.value || isTherapist.value)
 
   // -------------------------------------------------------------------------
+  // 错误处理
+  // -------------------------------------------------------------------------
+  // error 和 errorCode 必须**成对**改动。分开写的话，迟早会漏掉一处，
+  // 于是界面上挂着上一次的错误码，据此做出的判断（比如要不要显示
+  // 「重新发送确认邮件」）就会错得莫名其妙。
+  // -------------------------------------------------------------------------
+
+  function clearError(): void {
+    error.value = null
+    errorCode.value = null
+  }
+
+  /** 认证类错误：翻成中文，并把错误码一起记下来供界面分支用 */
+  function setAuthError(e: unknown, fallback: string): void {
+    const info = authErrorInfo(e, fallback)
+    error.value = info.message
+    errorCode.value = info.code
+  }
+
+  // -------------------------------------------------------------------------
   // actions
   // -------------------------------------------------------------------------
   async function fetchProfile(): Promise<void> {
@@ -77,7 +132,7 @@ export const useUserStore = defineStore('user', () => {
 
     // 先清空上一次的错误。这个方法在每次 auth 状态变化后都会被调用，
     // 一次瞬时失败留下的错误会一直挂在界面上 —— 与其他方法保持一致
-    error.value = null
+    clearError()
 
     const { data, error: err } = await supabase
       .from('profiles')
@@ -99,7 +154,7 @@ export const useUserStore = defineStore('user', () => {
     const id = userId.value
     if (!id) return false
 
-    error.value = null
+    clearError()
     const { data, error: err } = await supabase
       .from('profiles')
       .update(patch)
@@ -158,7 +213,7 @@ export const useUserStore = defineStore('user', () => {
     } catch (e) {
       // 最常见的原因：控制台没开启 Anonymous Sign-ins。
       // 守卫收到 false 会退回登录页，用户至少还能用系统
-      error.value = toMessage(e, '无法建立访客会话')
+      setAuthError(e, '无法建立访客会话')
       return false
     } finally {
       loading.value = false
@@ -178,14 +233,18 @@ export const useUserStore = defineStore('user', () => {
     password: string,
     displayName?: string,
   ): Promise<{ ok: boolean; pendingEmail: string | null }> {
-    error.value = null
+    clearError()
     loading.value = true
     try {
-      const { data, error: err } = await supabase.auth.updateUser({
-        email: email.trim(),
-        password,
-        data: { display_name: displayName?.trim() || undefined },
-      })
+      const { data, error: err } = await supabase.auth.updateUser(
+        {
+          email: email.trim(),
+          password,
+          data: { display_name: displayName?.trim() || undefined },
+        },
+        // 换邮箱时 Supabase 会往新地址发一封确认信，这个地址是它的落点
+        { emailRedirectTo: authRedirectBase() },
+      )
       if (err) throw err
 
       // 若项目开启了邮箱确认，新邮箱处于待确认状态（user.new_email），
@@ -205,7 +264,7 @@ export const useUserStore = defineStore('user', () => {
 
       return { ok: true, pendingEmail: null }
     } catch (e) {
-      error.value = toMessage(e, '保存账号失败')
+      setAuthError(e, '保存账号失败')
       return { ok: false, pendingEmail: null }
     } finally {
       loading.value = false
@@ -220,7 +279,7 @@ export const useUserStore = defineStore('user', () => {
    * 导航栏会先空一下再显示用户名。
    */
   async function signIn(email: string, password: string): Promise<boolean> {
-    error.value = null
+    clearError()
     loading.value = true
     try {
       const { data, error: err } = await supabase.auth.signInWithPassword({
@@ -233,7 +292,7 @@ export const useUserStore = defineStore('user', () => {
       await fetchProfile()
       return true
     } catch (e) {
-      error.value = toMessage(e, '登录失败')
+      setAuthError(e, '登录失败')
       return false
     } finally {
       loading.value = false
@@ -257,13 +316,17 @@ export const useUserStore = defineStore('user', () => {
     password: string,
     options: { displayName?: string; role?: 'patient' | 'family' } = {},
   ): Promise<{ ok: boolean; needsEmailConfirmation: boolean }> {
-    error.value = null
+    clearError()
     loading.value = true
     try {
       const { data, error: err } = await supabase.auth.signUp({
         email: email.trim(),
         password,
         options: {
+          // 确认邮件里那个链接点回来的落点。
+          // 不显式给的话用的是控制台里的 Site URL，那可能是另一个地址
+          // （比如本地开发时填的 localhost），线上就会跳错地方。
+          emailRedirectTo: authRedirectBase(),
           // 这些字段会进 auth.users.raw_user_meta_data，
           // 由 handle_new_user 触发器读出来写进 profiles
           data: {
@@ -282,21 +345,113 @@ export const useUserStore = defineStore('user', () => {
       await fetchProfile()
       return { ok: true, needsEmailConfirmation: false }
     } catch (e) {
-      error.value = toMessage(e, '注册失败')
+      setAuthError(e, '注册失败')
       return { ok: false, needsEmailConfirmation: false }
     } finally {
       loading.value = false
     }
   }
 
+  // -------------------------------------------------------------------------
+  // 找回密码
+  // -------------------------------------------------------------------------
+
+  /**
+   * 发送重置密码邮件。
+   *
+   * 回跳地址指向 `/<base>/reset-password`，用户点邮件后直接落在设置新密码的
+   * 页面上，而不是先落到首页再自己找路。
+   *
+   * ⚠️ 返回 true **不代表这个邮箱存在**。Supabase 对未注册的邮箱同样回成功，
+   *    这是刻意的反枚举设计：否则任何人都能拿这个接口试探哪些邮箱注册过。
+   *    所以界面上的文案也必须是「如果该邮箱已注册，邮件已发出」这种说法，
+   *    不能写成"邮件已发送到 xxx"。
+   */
+  async function sendPasswordReset(email: string): Promise<boolean> {
+    clearError()
+    loading.value = true
+    try {
+      const { error: err } = await supabase.auth.resetPasswordForEmail(
+        email.trim(),
+        { redirectTo: passwordResetRedirect() },
+      )
+      if (err) throw err
+      return true
+    } catch (e) {
+      setAuthError(e, '发送重置邮件失败')
+      return false
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /** 重发注册确认邮件。用于「注册了但没收到信」这个最常见的卡点 */
+  async function resendConfirmation(email: string): Promise<boolean> {
+    clearError()
+    loading.value = true
+    try {
+      const { error: err } = await supabase.auth.resend({
+        type: 'signup',
+        email: email.trim(),
+        options: { emailRedirectTo: authRedirectBase() },
+      })
+      if (err) throw err
+      return true
+    } catch (e) {
+      setAuthError(e, '重新发送失败')
+      return false
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
+   * 设置新密码。只在「从重置邮件链接进来」的场景下调用 ——
+   * 它作用在当前会话上，而那个会话正是点邮件链接建立的。
+   */
+  async function updatePassword(password: string): Promise<boolean> {
+    clearError()
+    loading.value = true
+    try {
+      const { error: err } = await supabase.auth.updateUser({ password })
+      if (err) throw err
+
+      // 改密码通常是因为"原密码可能已经泄露了"。把**其它设备**上的会话
+      // 一并作废，否则攻击者手里那个旧会话还能继续用，改密码就白改了。
+      // 当前这个会话保留，用户不用重新登录。
+      //
+      // 这一步失败不影响"密码已经改成功"这个事实，所以只记不抛
+      const { error: revokeErr } = await supabase.auth.signOut({
+        scope: 'others',
+      })
+      if (revokeErr) {
+        console.warn('撤销其它设备的登录态失败：', revokeErr.message)
+      }
+
+      await fetchProfile()
+      return true
+    } catch (e) {
+      setAuthError(e, '设置新密码失败')
+      return false
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /** 退出「重设密码」流程。设完密码、或者用户放弃时调用，之后守卫不再拦人 */
+  function exitRecovery(): void {
+    recoveryMode.value = false
+    linkError.value = null
+  }
+
   async function signOut(): Promise<void> {
     // 与其他方法保持一致。退出失败本身值得让用户看到，但下次再点一次
     // 就该把这条旧错误清掉，而不是叠着显示
-    error.value = null
+    clearError()
 
     const { error: err } = await supabase.auth.signOut()
     if (err) {
-      error.value = toMessage(err, '退出登录失败')
+      setAuthError(err, '退出登录失败')
       return
     }
     reset()
@@ -305,7 +460,11 @@ export const useUserStore = defineStore('user', () => {
   function reset(): void {
     session.value = null
     profile.value = null
-    error.value = null
+    clearError()
+    // 恢复流程也要一并退出。不清的话，用户在重设密码页点了「退出登录」之后
+    // 会被守卫锁在一个没有会话的页面上，进退不得
+    recoveryMode.value = false
+    linkError.value = null
     // 两个 Promise 一并清空：登出后再调 init() / ensureGuestSession()
     // 应当能重新走一遍，而不是拿到上一次的结果
     initPromise = null
@@ -326,6 +485,34 @@ export const useUserStore = defineStore('user', () => {
   // （initPromise 幂等），所以不存在"上一次的错误残留"这一说。清空反而会
   // 把 getSession 失败的原因盖掉，让用户不知道白屏是为什么。
   async function doInit(): Promise<void> {
+    // ---------------------------------------------------------------------
+    // 订阅必须**早于** getSession()，这个顺序不能换。
+    //
+    // 用户点重置密码邮件的链接回来时，SDK 解析完 URL 会发出 PASSWORD_RECOVERY
+    // 事件。但看 SDK 源码，它是用一句裸的 `setTimeout(..., 0)` 发的，**不进**
+    // initialize 的通知队列；而 getSession() 返回之后这里还跟着一次
+    // fetchProfile 网络请求。等那之后再订阅，事件早就发完了 ——
+    // 用户会被当成普通登录直接进首页，整个找回密码流程静默失效。
+    //
+    // 换句话说：这里即使已经有了 lib/authRedirect.ts 的同步兜底，
+    // 订阅位置也仍然要对——那条兜底只认"页面加载时 URL 里有令牌"，
+    // 覆盖不了 SDK 自己触发的场景。
+    // ---------------------------------------------------------------------
+    //
+    // ⚠️ 回调必须是同步的。supabase-js 触发这个回调时持有内部锁，
+    //    若在回调里直接 await 别的 supabase 调用（比如 fetchProfile），
+    //    会和锁的持有者互相等待，整个 auth 模块死锁。
+    //    所以异步工作一律用 setTimeout 推到下一个事件循环再执行。
+    supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === 'PASSWORD_RECOVERY') recoveryMode.value = true
+
+      session.value = nextSession
+      setTimeout(() => {
+        if (nextSession) void fetchProfile()
+        else profile.value = null
+      }, 0)
+    })
+
     loading.value = true
     try {
       const { data, error: err } = await supabase.auth.getSession()
@@ -334,25 +521,11 @@ export const useUserStore = defineStore('user', () => {
       session.value = data.session
       if (data.session) await fetchProfile()
     } catch (e) {
-      error.value = toMessage(e, '初始化登录态失败')
+      setAuthError(e, '初始化登录态失败')
     } finally {
       loading.value = false
       initialized.value = true
     }
-
-    // 订阅后续的登录、登出、token 续期事件。
-    //
-    // ⚠️ 回调必须是同步的。supabase-js 触发这个回调时持有内部锁，
-    //    若在回调里直接 await 别的 supabase 调用（比如 fetchProfile），
-    //    会和锁的持有者互相等待，整个 auth 模块死锁。
-    //    所以异步工作一律用 setTimeout 推到下一个事件循环再执行。
-    supabase.auth.onAuthStateChange((_event, nextSession) => {
-      session.value = nextSession
-      setTimeout(() => {
-        if (nextSession) void fetchProfile()
-        else profile.value = null
-      }, 0)
-    })
   }
 
   return {
@@ -361,7 +534,10 @@ export const useUserStore = defineStore('user', () => {
     profile,
     loading,
     error,
+    errorCode,
     initialized,
+    recoveryMode,
+    linkError,
     // getters
     isLoggedIn,
     isGuest,
@@ -384,5 +560,9 @@ export const useUserStore = defineStore('user', () => {
     signUp,
     signOut,
     reset,
+    sendPasswordReset,
+    resendConfirmation,
+    updatePassword,
+    exitRecovery,
   }
 })

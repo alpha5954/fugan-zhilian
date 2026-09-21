@@ -1,3 +1,10 @@
+// ⚠️ 这一行必须是第一个 import，不能往下挪。
+//
+// 它在模块求值时就同步读走 URL 里的认证回调参数（重置密码链接的令牌、
+// 或者链接失效的 error_code）。Supabase SDK 解析完 URL 之后会把 hash 清空，
+// 排在它后面加载的模块就读不到了。详见 lib/authRedirect.ts 的说明。
+import './lib/authRedirect'
+
 import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 

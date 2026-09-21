@@ -11,7 +11,8 @@
     "check:assessment": "node scripts/check-assessment.ts",
     "check:analysis": "node scripts/check-analysis.ts",
     "check:alerts": "node scripts/check-alerts.ts",
-    "check": "npm run check:simulator && npm run check:assessment && npm run check:analysis && npm run check:alerts"
+    "check:auth": "node scripts/check-auth.ts",
+    "check": "npm run check:simulator && npm run check:assessment && npm run check:analysis && npm run check:alerts && npm run check:auth"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
