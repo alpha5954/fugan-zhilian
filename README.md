@@ -41,6 +41,33 @@ Element Plus **按需引入**，由 `vite.config.ts` 里两个 unplugin 插件�
 
 > 顺带一提：改成按需引入后类型检查变严了，`el-table` 插槽的 `row` 从 `any` 变成了 `DefaultRow`，暴露出 `Devices.vue` 里三处未经验证的类型断言。这是好事，已用 `asDevice()` 显式收窄。
 
+## 图标与品牌
+
+浏览器标签页、iOS 主屏图标都由项目 logo 生成：
+
+```
+design/logo-source.jpg    原始图（不参与构建，仅作再生成的源）
+scripts/make-icons.py     生成脚本
+public/                   生成结果，会被打进产物
+├── favicon.ico           16/32/48 打包，老浏览器与 Windows 用
+├── favicon-16.png
+├── favicon-32.png
+├── apple-touch-icon.png  180×180，白底（iOS 不接受透明图标）
+└── logo.png              512×512，顶栏也用这张
+```
+
+**重新生成**（改了 logo 或要加尺寸时）：
+
+```bash
+python scripts/make-icons.py
+```
+
+脚本里有两处不显然的处理：
+
+**① 抠背景不能用洪水填充。** 第一版从四角填充识别圆外白底，结果填充率 62.9%（理论应约 34%）——填充顺着圆形边缘渗进了鱼鳞之间的白色缝隙，圆内 38.4% 变成透明，logo 在深色背景上会镂空。改成**几何方式**：非白像素的包围盒就是圆的直径，只抠这个圆之外。圆内的白色负空间是设计的一部分，必须保留。
+
+**② `ImageDraw.floodfill` 在二值 `L` 图上不生效。** 实测填充 0 个像素；对 RGB 图填充才正常。这条留作记录，免得以后有人再踩。
+
 ## 环境要求
 
 - Node.js 20+（当前开发环境为 v24.18.0）

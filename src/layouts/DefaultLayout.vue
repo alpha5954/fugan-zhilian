@@ -99,7 +99,7 @@ async function handleCommand(command: string) {
   <div class="layout">
     <header class="topbar">
       <RouterLink to="/dashboard" class="brand">
-        <img src="/logo.jpg" alt="" class="brand__mark" />
+        <img src="/logo.png" alt="" class="brand__mark" />
         <span class="brand__name">复感智联</span>
         <span class="brand__divider" />
         <span class="brand__sub">智能评估系统</span>

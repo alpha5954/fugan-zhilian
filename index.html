@@ -2,8 +2,26 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- 图标由 public/logo.jpg 生成（见仓库说明）。
+         ico 放最前：老浏览器和 Windows 只认它，后面的 png 是现代浏览器的
+         首选 —— 它们会跳过不支持的格式自己挑最合适的。 -->
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" type="image/png" href="/favicon-32.png" sizes="32x32" />
+    <link rel="icon" type="image/png" href="/favicon-16.png" sizes="16x16" />
+    <!-- iOS 添加到主屏时用这个。它不接受透明图标，会自行填黑，所以这张是白底 -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- 移动端浏览器地址栏的配色，与品牌色一致 -->
+    <meta name="theme-color" content="#1a4d87" />
+
+    <!-- 公开站点，给个描述方便被检索和分享时显示 -->
+    <meta
+      name="description"
+      content="面向人因工程与康复检测的柔性多模态传感与评估系统"
+    />
+
     <title>复感智联 · 智能评估系统</title>
   </head>
   <body>
