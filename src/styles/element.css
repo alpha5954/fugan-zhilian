@@ -161,6 +161,31 @@
   box-shadow: 0 0 0 1px var(--line-strong) inset;
 }
 
+/* Chrome 自动填充会把输入框刷成淡蓝色，在整套中性灰的表单里非常扎眼
+   —— 登录页邮箱一栏被记住密码之后就是这样一片蓝。
+
+   没法用 background 覆盖：UA 的 :-webkit-autofill 样式优先级更高，
+   直接写 background 无效。通行做法是用一个超大的内阴影把底色盖住，
+   再配合一个长得离谱的 transition 让浏览器不去重绘背景。
+
+   文字色要一起设：自动填充时 UA 会把字色改成黑色，覆盖掉我们的 --ink-800。 */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--ink-800);
+  /* 1000px 是惯用值，足够盖住任何输入框；inset 让它画在内容下面 */
+  -webkit-box-shadow: 0 0 0 1000px var(--surface) inset;
+  box-shadow: 0 0 0 1000px var(--surface) inset;
+  /* 时间设得极长，浏览器就不会在动画期间把原本的蓝底重绘出来 */
+  transition: background-color 9999s ease-out 0s;
+}
+
+/* 外框的描边不用管：上面那条内阴影只作用在 input 自己的盒子里，
+   .el-input__wrapper 的描边照常显示；聚焦态由 EP 的 .is-focus 负责，
+   它的选择器权重更高，会盖过这里的 --line。
+   所以别在这里再给 wrapper 加一条描边规则 —— 那会让自动填充过的输入框
+   看起来像一直处于聚焦状态。 */
+
 /* ---------- 表格 ---------- */
 /* 临床界面要的是可扫读，不是疏朗。行高压到 40px 左右 */
 .el-table {

@@ -158,14 +158,14 @@ async function handleCommand(command: string) {
         class="guest-tip"
         @close="dismissGuestTip"
       >
-        <template #title>访客模式</template>
+        <template #title>当前为访客模式</template>
         <p class="guest-tip__text">
-          你可以直接使用全部功能，数据已存在云端。但当前是临时账号，
-          换设备或清理浏览器后就找不回来了 ——
+          系统已为本次访问创建临时账号，数据存储于云端。该账号仅与当前浏览器关联，
+          清除浏览器数据或更换设备后无法恢复 ——
           <RouterLink to="/login" class="guest-tip__link">
-            设置邮箱密码保存账号
+            设置邮箱与密码
           </RouterLink>
-          ，此前的数据会全部保留。
+          可升级为正式账号，现有数据完整保留。
         </p>
       </el-alert>
 

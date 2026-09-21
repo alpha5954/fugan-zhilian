@@ -6,7 +6,8 @@
 // 它们填的是同一批字段（邮箱、密码），拆开之后来回跳转会丢掉已填的内容。
 //
 //   signin —— 已有账号登录
-//   signup —— 注册。访客模式下这里其实是**升级当前账号**（措辞随身份变）
+//   signup —— 注册。访客模式下这个动作其实是**升级当前账号**，标签统一写
+//             「注册」保证能找到，按钮上再写清"并保存数据"
 //   reset  —— 只填邮箱，发一封重置密码的邮件。真正的"设置新密码"在
 //             /reset-password，那是用户点邮件链接之后才到的页面
 // ============================================================================
@@ -179,10 +180,11 @@ async function handleSignIn() {
   if (user.isGuest) {
     try {
       await ElMessageBox.confirm(
-        '登录已有账号后，当前访客模式下的数据（绑定的设备、保存的训练记录）' +
-          '会留在临时账号里，不会跟随过来。\n\n' +
-          '想保留这些数据，请改用「保存账号」把当前访客账号升级为正式账号。',
-        '当前处于访客模式',
+        '登录已有账号后，本次会话将切换至该账号。访客模式下产生的数据' +
+          '（已绑定设备、已保存训练记录）仍保留在原临时账号中，' +
+          '不会随本次登录转移。\n\n' +
+          '如需保留这些数据，请改用「注册」将当前访客账号升级为正式账号。',
+        '当前为访客模式',
         {
           confirmButtonText: '仍要登录',
           cancelButtonText: '返回',
@@ -200,7 +202,7 @@ async function handleSignIn() {
 }
 
 // ---------------------------------------------------------------------------
-// 注册 / 保存账号
+// 注册
 // ---------------------------------------------------------------------------
 async function handleSignUp() {
   // 访客走「升级当前账号」，uid 不变，数据完整保留
@@ -275,11 +277,10 @@ function goAfterAuth() {
 const submitLabel = computed(() => {
   if (mode.value === 'reset') return '发送重置邮件'
   if (mode.value === 'signin') return '登录'
-  return user.isGuest ? '保存账号' : '注册'
+  // 访客模式下这个动作确实是把当前匿名账号升级掉，而不是新建一个。
+  // 按钮上说得具体些，用户按下去之前就知道数据会跟着走
+  return user.isGuest ? '注册并保存数据' : '注册'
 })
-
-/** 访客模式下第二个标签不叫"注册" —— 那是升级当前账号，不是新建 */
-const signupTabLabel = computed(() => (user.isGuest ? '保存账号' : '注册'))
 
 /**
  * 邮箱没验证是**最常见**的登录失败原因，而且用户看到"邮箱或密码不正确"
@@ -292,7 +293,8 @@ const needsEmailConfirmation = computed(
 
 <template>
   <AuthShell>
-    <!-- 访客提示：说清"保存账号"到底做了什么，否则用户会以为是新建一个号 -->
+    <!-- 访客提示：说清"注册"对访客到底意味着什么，否则用户会以为是新建一个号、
+         进而担心当前数据丢失 -->
     <el-alert
       v-if="user.isGuest && mode !== 'reset'"
       type="info"
@@ -300,11 +302,11 @@ const needsEmailConfirmation = computed(
       show-icon
       class="guest"
     >
-      <template #title>当前是访客模式</template>
+      <template #title>当前为访客模式</template>
       <p class="guest__text">
-        你正在使用一个临时账号，数据已经存在云端，但换设备或清理浏览器后就找不回来了。
-        设置邮箱和密码即可把它变成正式账号 ——
-        <strong>当前的所有数据都会保留</strong>。
+        系统已为本次访问创建临时账号，数据存储于云端。该账号仅与当前浏览器关联，
+        清除浏览器数据或更换设备后无法恢复。设置邮箱与密码可将其升级为正式账号，
+        <strong>现有数据完整保留</strong>。
       </p>
     </el-alert>
 
@@ -327,7 +329,7 @@ const needsEmailConfirmation = computed(
         :aria-selected="mode === 'signup'"
         @click="mode = 'signup'"
       >
-        {{ signupTabLabel }}
+        注册
       </button>
     </div>
 

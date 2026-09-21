@@ -264,7 +264,7 @@ export const useUserStore = defineStore('user', () => {
 
       return { ok: true, pendingEmail: null }
     } catch (e) {
-      setAuthError(e, '保存账号失败')
+      setAuthError(e, '注册失败')
       return { ok: false, pendingEmail: null }
     } finally {
       loading.value = false
