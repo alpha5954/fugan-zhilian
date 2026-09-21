@@ -5,19 +5,24 @@
 // 四路信号：sEMG、关节角度、温度、应变-温度解耦。
 // 数据来自模拟器（硬件尚未接入），界面全程标注「模拟数据」，不伪装成实测。
 // ============================================================================
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { ElMessage } from 'element-plus'
 
+import FoldToggle from '@/components/FoldToggle.vue'
+import RiskBadge from '@/components/RiskBadge.vue'
 import SignalChart from '@/components/SignalChart.vue'
 import type { ChartAxis, ChartSeries } from '@/components/SignalChart.vue'
 import { useMonitor } from '@/composables/useMonitor'
+import type { RiskBand } from '@/lib/insight'
 import type { MonitorScenario } from '@/lib/simulator'
 import { useDeviceStore } from '@/stores/device'
+import { usePrefsStore } from '@/stores/prefs'
 import { token } from '@/lib/theme'
 
 const monitor = useMonitor()
 const devices = useDeviceStore()
+const prefs = usePrefsStore()
 
 const {
   scenario,
@@ -123,6 +128,103 @@ const decoupleLegend = [
   { name: '温度分量', color: token('--warn') },
 ]
 
+// ---------------------------------------------------------------------------
+// 家属模式：当前状态
+// ---------------------------------------------------------------------------
+// 家属打开这一页想知道的不是"四路曲线长什么样"，而是：
+// 设备连上了吗、温度安全吗、现在在做什么。
+//
+// 波形、采样率、电量、校准、导出 CSV 全部收进折叠区，专业模式才默认展开。
+// ---------------------------------------------------------------------------
+
+/** 家属模式下技术视图是否展开。默认收起 */
+const waveOpen = ref(false)
+
+/**
+ * 距离阈值多近就该提前提醒（摄氏度）。
+ *
+ * 1.5 °C 是个折中：太近（比如 0.5）等于没有提前量，等提醒时已经出事了；
+ * 太远（比如 3）会让热敷过程中一直在报警，家属很快就学会无视它。
+ */
+const TEMP_WARN_MARGIN = 1.5
+
+/** 温度是否已进入"接近上限"的区间 */
+const tempNearLimit = computed(
+  () => latest.value !== null && latest.value.temp >= monitor.tempThreshold - TEMP_WARN_MARGIN,
+)
+
+/**
+ * 整体状态。
+ *
+ * 信号中断和温度越阈都是**红**：前者意味着读数不可信，后者是真会造成
+ * 低温烫伤的安全问题。接近上限是**黄**，还没出事但这个提前量正是
+ * 家属模式存在的理由 —— 等到红的时候，热敷已经做完了。
+ */
+const band = computed<RiskBand>(() => {
+  if (signalLost.value || tempAlertOn.value) return 'red'
+  if (tempNearLimit.value) return 'yellow'
+  return 'green'
+})
+
+interface StatusItem {
+  label: string
+  value: string
+  /**
+   * 风险灯。**可以没有** —— 只有真正带风险含义的项才配灯。
+   *
+   * 「采集时长 00:00」和「当前场景 康复训练」本来就不是风险项，
+   * 给它们挂一个绿点会让人以为那是在评价"时长是否正常"。
+   * 而「皮肤温度 —」挂绿点更糟：没有读数却显示"正常"。
+   */
+  band?: RiskBand
+}
+
+const statusItems = computed<StatusItem[]>(() => {
+  const s = latest.value
+  return [
+    {
+      label: '设备信号',
+      // 没开始采集就说"未开始"，不配灯 —— 闲置不是异常
+      value: signalLost.value ? '中断' : running.value ? '采集正常' : '未开始',
+      band: signalLost.value ? 'red' : running.value ? 'green' : undefined,
+    },
+    {
+      label: '皮肤温度',
+      // 拿不到读数时不给灯。绿点配一个 "—" 等于在说"没数据=正常"
+      value: s ? `${s.temp.toFixed(1)} °C` : '—',
+      band: !s
+        ? undefined
+        : tempAlertOn.value
+          ? 'red'
+          : tempNearLimit.value
+            ? 'yellow'
+            : 'green',
+    },
+    {
+      label: '当前场景',
+      value: scenarioInfo[scenario.value].label,
+    },
+    {
+      label: '采集时长',
+      value: elapsedText.value,
+    },
+  ]
+})
+
+/** 一句话结论。要能直接回答"现在有没有事" */
+const statusHeadline = computed(() => {
+  if (signalLost.value)
+    return '设备信号中断了，请检查电极片是否贴牢、设备是否有电'
+  if (tempAlertOn.value) return '皮肤温度已超过预警线，请先停止热敷让皮肤休息'
+  if (!running.value) return '还没有开始采集，点下面的按钮开始'
+  if (tempNearLimit.value) return '皮肤温度接近上限，留意热敷时间不要过长'
+  return '一切正常，可以继续'
+})
+
+/** 采集开始 / 暂停。家属模式只需要这一个控制 */
+function onToggle() {
+  toggle()
+}
 </script>
 
 <template>
@@ -148,6 +250,49 @@ const decoupleLegend = [
       description="传感器当前无有效读数，图表已断开。请检查电极是否贴合、设备是否在连接范围内。"
     />
 
+    <!-- ================= 家属模式：当前状态 =================
+         家属打开这一页想知道的不是"四路曲线长什么样"，而是
+         设备连上了吗、温度安全吗、现在在做什么。 -->
+    <section v-if="!prefs.proMode" class="status" :class="`status--${band}`">
+      <p class="status__headline">
+        <RiskBadge :band="band" dot size="md" />
+        <span>{{ statusHeadline }}</span>
+      </p>
+
+      <ul class="status__list">
+        <li v-for="item in statusItems" :key="item.label" class="status__item">
+          <span class="status__label">{{ item.label }}</span>
+          <span class="status__value">
+            <RiskBadge v-if="item.band" :band="item.band" dot size="sm" />
+            {{ item.value }}
+          </span>
+        </li>
+      </ul>
+
+      <!-- 家属只需要这一个控制。校准、导出、清空都在下面的折叠区里 -->
+      <el-button
+        :type="running ? 'warning' : 'primary'"
+        size="large"
+        class="status__action"
+        @click="onToggle"
+      >
+        {{ running ? '暂停采集' : '开始采集' }}
+      </el-button>
+    </section>
+
+    <!-- 家属模式下技术视图折叠起来；专业模式直接展开 -->
+    <FoldToggle
+      v-if="!prefs.proMode"
+      :open="waveOpen"
+      label="查看原始波形与设备参数"
+      @toggle="waveOpen = !waveOpen"
+    />
+
+    <!-- 折叠区。用 v-if 而不是 v-show：收着的时候四个 ECharts 实例
+         没必要挂着（每个都带 ResizeObserver 和定时重绘）。
+         下面这一段的缩进保持原样没有跟着加一级 —— 纯缩进改动会把
+         这次的真实改动淹掉，Vue 也不关心缩进。 -->
+    <template v-if="prefs.proMode || waveOpen">
     <!-- 设备状态栏 -->
     <section class="statusbar">
       <div class="statusbar__group">
@@ -280,10 +425,20 @@ const decoupleLegend = [
       </article>
     </section>
 
+    <!-- 技术说明也只在专业模式显示：家属不需要知道 GF 和 TCR 是什么 -->
     <p class="footnote">
       四路信号由内置模拟器按传感器实际参数生成（GF 5.68、TCR −1.04 %·°C⁻¹），
       原始信号 = 应变分量 + 温度分量 + 测量噪声。硬件接入后替换数据源即可，
       图表与解耦逻辑无需改动。
+    </p>
+    </template>
+
+    <!-- 数据来源声明：两种模式都要有。
+         README 里那条「不把模拟数据说成实测数据」是底线，
+         家属模式把技术说明折起来了，但这句不能跟着藏 -->
+    <p v-if="!prefs.proMode" class="footnote footnote--family">
+      当前显示的是内置模拟器生成的数据，用于演示系统能力；接入传感器后
+      会换成实测数据。
     </p>
   </div>
 </template>
@@ -293,6 +448,89 @@ const decoupleLegend = [
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* ==========================================================================
+   家属模式：当前状态卡
+   ==========================================================================
+   整页给家属看的主内容。左侧色条表达风险等级，与摘要页是同一套语言。
+   ========================================================================== */
+.status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--line-strong);
+  border-radius: var(--r-md);
+}
+
+.status--green {
+  border-left-color: var(--ok);
+}
+
+.status--yellow {
+  border-left-color: var(--warn);
+}
+
+.status--red {
+  border-left-color: var(--danger);
+}
+
+.status__headline {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-base);
+  color: var(--ink-800);
+}
+
+.status__list {
+  display: grid;
+  /* 窄屏自动折行。四项目标在手机上排成两列也读得清 */
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--sp-3) var(--sp-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.status__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.status__label {
+  font-size: var(--fs-xs);
+  color: var(--ink-400);
+}
+
+.status__value {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+  color: var(--ink-800);
+}
+
+/* 触控下限 44px */
+.status__action {
+  align-self: flex-start;
+  min-width: 168px;
+  min-height: 44px;
+}
+
+@media (max-width: 640px) {
+  .status__action {
+    align-self: stretch;
+    width: 100%;
+  }
 }
 
 /* ---------- 设备状态栏 ---------- */

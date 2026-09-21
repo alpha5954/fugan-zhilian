@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     AuthShell: typeof import('./components/AuthShell.vue')['default']
     BarChart: typeof import('./components/BarChart.vue')['default']
+    ConclusionCard: typeof import('./components/ConclusionCard.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElBadge: typeof import('element-plus/es')['ElBadge']
     ElButton: typeof import('element-plus/es')['ElButton']
@@ -38,6 +39,7 @@ declare module 'vue' {
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
     ElTag: typeof import('element-plus/es')['ElTag']
     ErrorBoundary: typeof import('./components/ErrorBoundary.vue')['default']
+    FoldToggle: typeof import('./components/FoldToggle.vue')['default']
     PagePlaceholder: typeof import('./components/PagePlaceholder.vue')['default']
     PhaseChart: typeof import('./components/PhaseChart.vue')['default']
     PieChart: typeof import('./components/PieChart.vue')['default']
