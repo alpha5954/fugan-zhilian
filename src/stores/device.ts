@@ -20,6 +20,21 @@ export const useDeviceStore = defineStore('device', () => {
   /** 是否已成功拉取过一次 —— 用来区分"空列表"和"还没查" */
   const loaded = ref(false)
   const error = ref<string | null>(null)
+  /**
+   * **操作类**失败（增删改、解绑、保存…）。
+   *
+   * ⚠️ 和上面的 `error` 是两个东西，不能混：
+   *
+   *   error    —— 拉取失败。页面把它绑给 StateBlock，展示成整页的
+   *               「加载失败」并把内容替换掉
+   *   opError  —— 用户主动做某件事失败了。界面只需要弹一个 toast，
+   *               **列表内容必须原样留着**
+   *
+   * 混用的后果实际发生过：解绑设备失败时，除了弹出正确的提示，
+   * 整张设备表还被替换成了「加载失败」—— 而其实什么都没加载失败，
+   * 用户看到的是一片空白，以为数据没了。
+   */
+  const opError = ref<string | null>(null)
 
   const onlineCount = computed(
     () => devices.value.filter((d) => d.status === 'online').length,
@@ -62,14 +77,14 @@ export const useDeviceStore = defineStore('device', () => {
   }
 
   async function create(payload: DeviceInsert): Promise<Device | null> {
-    error.value = null
+    opError.value = null
     const { data, error: err } = await supabase
       .from('devices')
       .insert(payload)
       .select('*')
 
     if (err) {
-      error.value = toMessage(err, '添加设备失败')
+      opError.value = toMessage(err, '添加设备失败')
       return null
     }
     // insert 有权重校验，无权时直接报错，所以这里不需要回读兜底；
@@ -96,7 +111,7 @@ export const useDeviceStore = defineStore('device', () => {
     const serial = serialNo.trim()
     if (!serial) return { ok: false, message: '请填写设备序列号' }
 
-    error.value = null
+    opError.value = null
 
     // 1. 先试认领
     const { data, error: rpcErr } = await supabase.rpc('claim_device', {
@@ -104,8 +119,8 @@ export const useDeviceStore = defineStore('device', () => {
     })
 
     if (rpcErr) {
-      error.value = toMessage(rpcErr, '绑定设备失败')
-      return { ok: false, message: error.value }
+      opError.value = toMessage(rpcErr, '绑定设备失败')
+      return { ok: false, message: opError.value }
     }
 
     const result = data as ClaimDeviceResult | null
@@ -129,7 +144,7 @@ export const useDeviceStore = defineStore('device', () => {
       })
       return created
         ? { ok: true, message: '已登记新设备并完成绑定' }
-        : { ok: false, message: error.value ?? '登记设备失败' }
+        : { ok: false, message: opError.value ?? '登记设备失败' }
     }
 
     return { ok: false, message: result?.message ?? '绑定失败' }
@@ -143,7 +158,7 @@ export const useDeviceStore = defineStore('device', () => {
    * addDevice() 重新认领。
    */
   async function unbind(id: string): Promise<boolean> {
-    error.value = null
+    opError.value = null
 
     const { data, error: err } = await supabase
       .from('devices')
@@ -152,11 +167,11 @@ export const useDeviceStore = defineStore('device', () => {
       .select('id')
 
     if (err) {
-      error.value = toMessage(err, '解绑失败')
+      opError.value = toMessage(err, '解绑失败')
       return false
     }
     if (!data?.length) {
-      error.value = '解绑未生效（无权限或设备不存在）'
+      opError.value = '解绑未生效（无权限或设备不存在）'
       return false
     }
 
@@ -180,7 +195,7 @@ export const useDeviceStore = defineStore('device', () => {
   }
 
   async function update(id: string, patch: DeviceUpdate): Promise<boolean> {
-    error.value = null
+    opError.value = null
     const { data, error: err } = await supabase
       .from('devices')
       .update(patch)
@@ -188,13 +203,13 @@ export const useDeviceStore = defineStore('device', () => {
       .select('*') // 回读确认，见下方说明
 
     if (err) {
-      error.value = toMessage(err, '更新设备失败')
+      opError.value = toMessage(err, '更新设备失败')
       return false
     }
     // RLS 对 UPDATE 是静默过滤：改别人的设备不报错、影响 0 行。
     // 不回读就无法分辨"改成功了"和"什么都没发生"。
     if (!data?.length) {
-      error.value = '更新未生效（无权限或设备不存在）'
+      opError.value = '更新未生效（无权限或设备不存在）'
       return false
     }
 
@@ -204,7 +219,7 @@ export const useDeviceStore = defineStore('device', () => {
   }
 
   async function remove(id: string): Promise<boolean> {
-    error.value = null
+    opError.value = null
     const { data, error: err } = await supabase
       .from('devices')
       .delete()
@@ -212,11 +227,11 @@ export const useDeviceStore = defineStore('device', () => {
       .select('id') // 同样需要回读：删除也是静默过滤
 
     if (err) {
-      error.value = toMessage(err, '删除设备失败')
+      opError.value = toMessage(err, '删除设备失败')
       return false
     }
     if (!data?.length) {
-      error.value = '删除未生效（无权限或设备不存在）'
+      opError.value = '删除未生效（无权限或设备不存在）'
       return false
     }
 
@@ -235,6 +250,7 @@ export const useDeviceStore = defineStore('device', () => {
     loading,
     loaded,
     error,
+    opError,
     onlineCount,
     byId,
     fetchAll,

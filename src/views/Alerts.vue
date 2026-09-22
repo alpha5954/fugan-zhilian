@@ -76,7 +76,7 @@ async function toggleAck(alert: Alert) {
       // 若筛选是"仅未处理"，刚标记完的那条应从列表消失
       if (onlyUnacknowledged.value) await load()
     } else {
-      ElMessage.error(alerts.error ?? '操作失败')
+      ElMessage.error(alerts.opError ?? '操作失败')
     }
   } finally {
     busyId.value = null
@@ -101,7 +101,7 @@ async function remove(alert: Alert) {
       ElMessage.success('已删除')
       await alerts.fetchUnacknowledgedCount(care.activePatientId)
     } else {
-      ElMessage.error(alerts.error ?? '删除失败')
+      ElMessage.error(alerts.opError ?? '删除失败')
     }
   } finally {
     busyId.value = null

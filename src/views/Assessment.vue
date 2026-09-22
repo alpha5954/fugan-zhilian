@@ -192,7 +192,7 @@ async function save() {
       ElMessage.success('已保存到训练记录')
     } else {
       // store 里已经把错误文本写进 error 了，直接展示
-      ElMessage.error(sessions.error ?? '保存失败')
+      ElMessage.error(sessions.opError ?? '保存失败')
     }
   } finally {
     saving.value = false

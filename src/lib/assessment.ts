@@ -14,6 +14,7 @@
 // （scripts/check-assessment.ts 靠它做自检）。@vue/tsconfig 已开启
 // allowImportingTsExtensions，vite 与 vue-tsc 都能正常解析。
 // 下面的 @/types 是纯类型导入，运行时会被擦除，不影响 node 解析。
+import type { Rng } from './rng.ts'
 import { SignalSimulator, type MotionProfile, type Sample } from './simulator.ts'
 import type { Waveform } from '@/types'
 
@@ -173,7 +174,10 @@ function rms(values: number[]): number {
  * 其余按与正确动作的"相似度"分配残差 —— 直腿抬高与坐位伸膝都属伸膝类，
  * 容易混淆，靠墙静蹲是静力动作，混淆概率最低。
  */
-function buildConfidence(trueExercise: ExerciseName): Record<string, number> {
+function buildConfidence(
+  trueExercise: ExerciseName,
+  rng: Rng = Math.random,
+): Record<string, number> {
   const SIMILARITY: Record<ExerciseName, Record<ExerciseName, number>> = {
     直腿抬高: { 直腿抬高: 1, 坐位伸膝: 0.55, 屈膝滑动: 0.3, 靠墙静蹲: 0.15 },
     坐位伸膝: { 直腿抬高: 0.55, 坐位伸膝: 1, 屈膝滑动: 0.35, 靠墙静蹲: 0.2 },
@@ -182,11 +186,11 @@ function buildConfidence(trueExercise: ExerciseName): Record<string, number> {
   }
 
   // 主类置信度在 0.88–0.96 之间浮动，围绕计划书公布的 0.94
-  const top = 0.88 + Math.random() * 0.08
+  const top = 0.88 + rng() * 0.08
   const sim = SIMILARITY[trueExercise]
 
   const rest = REHAB_EXERCISES.filter((e) => e !== trueExercise)
-  const weights = rest.map((e) => sim[e] * (0.6 + Math.random() * 0.8))
+  const weights = rest.map((e) => sim[e] * (0.6 + rng() * 0.8))
   const weightSum = weights.reduce((a, b) => a + b, 0)
 
   const result: Record<string, number> = { [trueExercise]: top }
@@ -312,6 +316,11 @@ function buildAdvice(
 export function generateSession(
   performed: ExerciseName,
   repCount: number,
+  /**
+   * 随机源。默认 Math.random；演示数据会传固定种子的进来，
+   * 让同一份演示每次刷新都一致（见 lib/rng.ts）。
+   */
+  rng: Rng = Math.random,
 ): SessionResult {
   const base = EXERCISE_PROFILE[performed]
 
@@ -319,13 +328,17 @@ export function generateSession(
   // 缓慢上升。少了这层波动，每次评估的 ROM 完全相同，对比图是一条恒定
   // 直线，达标结论也永远一样 —— 整个评估页就没有信息量了。
   // ±6% 的幅度足以让「本次 vs 上次」看出差别。
-  const drift = 0.94 + Math.random() * 0.12
+  const drift = 0.94 + rng() * 0.12
 
-  const sim = new SignalSimulator('rehab', {
-    angleMin: base.angleMin,
-    angleMax: base.angleMax * drift,
-    periodMs: base.periodMs,
-  })
+  const sim = new SignalSimulator(
+    'rehab',
+    {
+      angleMin: base.angleMin,
+      angleMax: base.angleMax * drift,
+      periodMs: base.periodMs,
+    },
+    rng,
+  )
 
   const seconds = SESSION_SECONDS
 
@@ -351,7 +364,7 @@ export function generateSession(
   })
 
   const temps = samples.map((s) => s.temp)
-  const confidence = buildConfidence(performed)
+  const confidence = buildConfidence(performed, rng)
 
   // 判定为置信度最高的那一类
   const recognized = REHAB_EXERCISES.reduce((best, e) =>

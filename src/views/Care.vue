@@ -96,7 +96,7 @@ async function approve(link: CareLinkWithName) {
     const ok = await care.approve(link.id)
     ok
       ? ElMessage.success(`已确认与「${displayName(link)}」的监护关系`)
-      : ElMessage.error(care.error ?? '确认失败')
+      : ElMessage.error(care.opError ?? '确认失败')
   } finally {
     busyId.value = null
   }
@@ -127,7 +127,7 @@ async function revoke(link: CareLinkWithName, self: 'patient' | 'caregiver') {
     const ok = await care.revoke(link.id)
     ok
       ? ElMessage.success(isReject ? '已拒绝该申请' : '已解除关系')
-      : ElMessage.error(care.error ?? '操作失败')
+      : ElMessage.error(care.opError ?? '操作失败')
   } finally {
     busyId.value = null
   }

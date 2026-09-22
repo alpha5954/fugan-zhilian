@@ -157,7 +157,7 @@ async function calibrate(row: Device) {
     const ok = await devices.touch(row.id)
     ok
       ? ElMessage.success(`「${row.serial_no}」校准完成，基线已重置`)
-      : ElMessage.error(devices.error ?? '校准失败')
+      : ElMessage.error(devices.opError ?? '校准失败')
   } finally {
     busyId.value = null
   }
@@ -184,7 +184,7 @@ async function upgrade(row: Device) {
     const ok = await devices.upgradeFirmware(row.id, target)
     ok
       ? ElMessage.success(`已升级到 ${target}`)
-      : ElMessage.error(devices.error ?? '升级失败')
+      : ElMessage.error(devices.opError ?? '升级失败')
   } finally {
     busyId.value = null
   }
@@ -207,7 +207,7 @@ async function unbind(row: Device) {
     const ok = await devices.unbind(row.id)
     ok
       ? ElMessage.success('已解绑。若需重新绑定，用同一序列号再添加一次即可。')
-      : ElMessage.error(devices.error ?? '解绑失败')
+      : ElMessage.error(devices.opError ?? '解绑失败')
   } finally {
     busyId.value = null
   }

@@ -22,6 +22,7 @@
 // ============================================================================
 
 import { generateSession } from './assessment.ts'
+import { DEMO_SEED, makeRng, type Rng } from './rng.ts'
 import type { ExerciseName } from './assessment.ts'
 import type { Alert, RehabSession, Waveform } from '@/types'
 
@@ -53,8 +54,9 @@ function makeSession(
   progress: number,
   now: Date,
   seq: number,
+  rng: Rng,
 ): RehabSession {
-  const result = generateSession(exercise, 8)
+  const result = generateSession(exercise, 8, rng)
 
   // 把本次的指标按康复进程缩放。真实康复中的进步就是这么来的 ——
   // 幅度一点点变大，其余特征不变
@@ -105,6 +107,10 @@ function makeSession(
  * 永远是满分的话，看不出它在起什么作用。
  */
 export function buildDemoSessions(now: Date = new Date()): RehabSession[] {
+  // 固定种子 —— 同一份演示每次刷新都是同一组数据。
+  // 不固定的话分数每次刷新都在变（实测出现过 81 / 77 / 80），
+  // 排练时记住的数到台上就变了。见 lib/rng.ts。
+  const rng = makeRng(DEMO_SEED)
   const out: RehabSession[] = []
   let seq = 0
 
@@ -116,7 +122,7 @@ export function buildDemoSessions(now: Date = new Date()): RehabSession[] {
     const progress = (DEMO_DAYS - 1 - d) / (DEMO_DAYS - 1)
     const exercise = ROTATION[(DEMO_DAYS - d) % ROTATION.length]!
 
-    out.push(makeSession(exercise, d, progress, now, seq++))
+    out.push(makeSession(exercise, d, progress, now, seq++, rng))
   }
 
   return out

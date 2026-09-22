@@ -20,6 +20,8 @@
 // ============================================================================
 
 /** 监测场景 */
+import type { Rng } from './rng.ts'
+
 export type MonitorScenario = 'rehab' | 'hotpack'
 
 /** 一个采样点 */
@@ -86,8 +88,8 @@ const DEFAULT_PROFILE: MotionProfile = {
   periodMs: REP_PERIOD_REHAB,
 }
 
-/** 热敷升温的总时长与温度区间 */
-const HOTPACK_RAMP_MS = 90_000
+/** 热敷袋温度与起始皮温。
+ *  注意升温**没有固定时长** —— 是指数趋近，见 computeTemp */
 const HOTPACK_TEMP_START = 40
 const HOTPACK_TEMP_END = 50
 
@@ -112,6 +114,38 @@ const DROPOUT_PROBABILITY = 0.002
 const DROPOUT_MIN_MS = 600
 const DROPOUT_MAX_MS = 1500
 
+/**
+ * 一次动作里关节角度随时间的归一化轨迹（0~1）。
+ *
+ * 刻意**不是余弦**。余弦有两个一眼能看出来的毛病：
+ *
+ *   1. 上升段和下降段完全对称 —— 真实动作里主动屈曲和回落的速度不一样
+ *   2. 两端只停留一瞬 —— 真实的康复动作在最大屈曲位会**保持一下**
+ *      （治疗师通常会要求"到顶停两秒"），起始位也有个换气的间隙
+ *
+ * 现在是：较快地屈曲 → 短暂保持 → 较慢地回落。
+ * 这个不对称也正是相位分析能看出东西的前提。
+ */
+const RISE_END = 0.4
+const HOLD_END = 0.52
+
+function smoothstep(x: number): number {
+  const t = Math.min(1, Math.max(0, x))
+  return t * t * (3 - 2 * t)
+}
+
+function motionShape(phase: number): number {
+  if (phase < RISE_END) return smoothstep(phase / RISE_END)
+  if (phase < HOLD_END) return 1
+  return 1 - smoothstep((phase - HOLD_END) / (1 - HOLD_END))
+}
+
+/** 热敷升温的时间常数（毫秒）。见 computeTemp 的说明 */
+const HOTPACK_TAU_MS = 28_000
+
+/** 康复训练皮温趋近平衡点的时间常数（毫秒） */
+const REHAB_TAU_MS = 90_000
+
 // ---------------------------------------------------------------------------
 
 export class SignalSimulator {
@@ -130,9 +164,30 @@ export class SignalSimulator {
   /** 当前这次信号丢失还剩多少毫秒；> 0 表示正在丢失 */
   private dropRemaining = 0
 
-  constructor(scenario: MonitorScenario = 'rehab', profile: Partial<MotionProfile> = {}) {
+  // --- 当前这一轮动作的参数。每轮重抽，见 computeMotion ---
+  private repStartT = 0
+  private repEndT = 0
+  /** 本轮周期（毫秒）。在标称值上抖动 */
+  private repPeriod = 0
+  /** 本轮的幅度系数。只往下抖，见 computeMotion 的说明 */
+  private repAmp = 1
+
+  /**
+   * 随机源。
+   *
+   * 默认 Math.random（实时监测就该每次不一样）；演示数据会传一个
+   * 固定种子的进来，让同一份演示每次刷新都一致。见 lib/rng.ts。
+   */
+  private rng: Rng
+
+  constructor(
+    scenario: MonitorScenario = 'rehab',
+    profile: Partial<MotionProfile> = {},
+    rng: Rng = Math.random,
+  ) {
     this.scenario = scenario
     this.profile = { ...DEFAULT_PROFILE, ...profile }
+    this.rng = rng
   }
 
   /** 切换场景并重置状态 */
@@ -148,6 +203,11 @@ export class SignalSimulator {
     this.emgPhase = 0
     this.tempBaseline = TEMP_REFERENCE
     this.dropRemaining = 0
+    // 归零，让下一轮重新抽参数（-1 表示"还没有当前轮"）
+    this.repStartT = 0
+    this.repEndT = -1
+    this.repPeriod = this.profile.periodMs
+    this.repAmp = 1
   }
 
   /**
@@ -179,9 +239,9 @@ export class SignalSimulator {
     // 恢复时温度会从断点接续，看起来像"信号丢失期间温度被冻住了"。
     if (this.dropRemaining > 0) {
       this.dropRemaining -= dt
-    } else if (Math.random() < DROPOUT_PROBABILITY) {
+    } else if (this.rng() < DROPOUT_PROBABILITY) {
       this.dropRemaining =
-        DROPOUT_MIN_MS + Math.random() * (DROPOUT_MAX_MS - DROPOUT_MIN_MS)
+        DROPOUT_MIN_MS + this.rng() * (DROPOUT_MAX_MS - DROPOUT_MIN_MS)
     }
     const lost = this.dropRemaining > 0
 
@@ -193,15 +253,28 @@ export class SignalSimulator {
     // 这里用载波 + 随机噪声混合，视觉上接近真实 sEMG 而非平滑正弦。
     this.emgPhase += (dt / 1000) * 2 * Math.PI * 7
     const carrier = Math.sin(this.emgPhase)
-    const noise = Math.random() * 2 - 1
+    const noise = this.rng() * 2 - 1
     const emg = envelope * (0.45 * carrier + 0.85 * noise)
 
     // ---- 解耦 ----
     // 角度 → 伸长率 → 应变分量
+    //
+    // 应变与角度**不是线性关系**。真实柔性传感器的导电网络在拉伸过程中
+    // 会重排，灵敏度随应变量变化 —— 计划书里的 GF = 5.68 是「0–50% 应变
+    // 区间」的**平均**灵敏度，这句话本身就意味着各区间灵敏度不同。
+    //
+    // 这里用一条温和的幂曲线：低应变区变化慢、高应变区变化快。
+    // 单调，所以"应变与角度高度正相关"那条断言仍然成立。
+    // ⚠️ 必须钳到 [0,1]。幂运算对负底数是 NaN —— 而角度小于 ANGLE_MIN
+    //    是**常态**不是异常：热敷场景的肢体静止角约 4°、直腿抬高的
+    //    angleMin 是 2°，两者都低于这里的 5°。不钳的话应变分量直接变
+    //    NaN，解耦图整条画不出来。自检脚本抓到了这个（"应变分量 NaN%"）。
+    const x = Math.min(
+      1,
+      Math.max(0, (angle - ANGLE_MIN) / (ANGLE_MAX - ANGLE_MIN)),
+    )
     const strainPct =
-      STRAIN_AT_MIN +
-      ((angle - ANGLE_MIN) / (ANGLE_MAX - ANGLE_MIN)) *
-        (STRAIN_AT_MAX - STRAIN_AT_MIN)
+      STRAIN_AT_MIN + (STRAIN_AT_MAX - STRAIN_AT_MIN) * x ** 1.35
     const strainPart = GAUGE_FACTOR * strainPct
 
     // 温度 → 温度分量（以校准基线为参考点，负温度系数）
@@ -209,51 +282,86 @@ export class SignalSimulator {
 
     // ---- 原始信号：两个分量叠加，再加测量噪声 ----
     // 这一行就是"耦合"本身，解耦算法的目标就是从它里面还原出上面两个分量
-    const raw = strainPart + tempPart + (Math.random() - 0.5) * 1.6
+    const raw = strainPart + tempPart + (this.rng() - 0.5) * 1.6
 
     return { t: this.t, emg, angle, temp, raw, strainPart, tempPart, lost }
   }
 
-  /** 局部温度 */
+  /**
+   * 局部温度。
+   *
+   * 【为什么是指数趋近而不是线性】
+   * 改造前是 `线性升到目标后保持`。两个问题：
+   *
+   *   1. **形状不对**。皮肤被加热时温度向热源温度**渐近**逼近（牛顿加热），
+   *      一开始升得快、后来越来越慢。线性升温在图上是一条笔直的斜线，
+   *      一眼能看出是生成的。
+   *   2. **到达那一刻斜率突变**，从斜线突然变成水平线 —— 真实的温度曲线
+   *      不会有一个折角。
+   *
+   * 时间常数按"90 秒走完约 96% 的行程"选，与改造前的时长体感一致，
+   * 但曲线形状完全不同。
+   */
   private computeTemp(): number {
     if (this.scenario === 'hotpack') {
-      // 热敷：从 40°C 线性升到 50°C
-      const progress = Math.min(1, this.t / HOTPACK_RAMP_MS)
-      this.tempNoise += (Math.random() - 0.5) * 0.02
+      this.tempNoise += (this.rng() - 0.5) * 0.02
       this.tempNoise *= 0.97
-      return HOTPACK_TEMP_START +
-        (HOTPACK_TEMP_END - HOTPACK_TEMP_START) * progress +
+      // 向热敷袋温度（HOTPACK_TEMP_END）渐近逼近
+      const span = HOTPACK_TEMP_END - HOTPACK_TEMP_START
+      return (
+        HOTPACK_TEMP_END -
+        span * Math.exp(-this.t / HOTPACK_TAU_MS) +
         this.tempNoise
+      )
     }
 
-    // 康复训练：皮肤温度随运动缓慢上升，从 33°C 到约 35.5°C
-    const target = 33.0 + 2.5 * Math.min(1, this.t / 180_000)
-    this.tempNoise += (Math.random() - 0.5) * 0.012
+    // 康复训练：肌肉产热，皮温向新的平衡点（35.5°C）渐近逼近
+    this.tempNoise += (this.rng() - 0.5) * 0.012
     this.tempNoise *= 0.98
-    return target + this.tempNoise
+    return 35.5 - 2.5 * Math.exp(-this.t / REHAB_TAU_MS) + this.tempNoise
   }
 
-  /** 关节角度与肌电包络 */
+  /**
+   * 关节角度与肌电包络。
+   *
+   * 【为什么要逐轮抖动】
+   * 改造前是 `t % periodMs` 算相位、乘一条固定的余弦 —— 结果是**每一轮
+   * 都一模一样**：同样的周期、同样的幅度，画在图上是一条完美的正弦。
+   * 真实患者做不到：注意力、疲劳、关节僵硬都会让每一轮略有差别。
+   *
+   * 现在每轮重抽周期（±6%）和幅度。幅度是**只往下抖**的：
+   *   1. 疲劳让活动范围变小，不会越做越大，物理上是单向的
+   *   2. 上限必须卡住 —— 抽查脚本断言最大角度不超过 profile 的 angleMax，
+   *      往上抖会直接让那条断言随机失败
+   */
   private computeMotion(): { angle: number; envelope: number } {
     if (this.scenario === 'hotpack') {
       // 热敷时肢体静止，只有极小的姿势抖动
       return {
-        angle: 4 + (Math.random() - 0.5) * 0.6,
+        angle: 4 + (this.rng() - 0.5) * 0.6,
         envelope: EMG_BASELINE,
       }
     }
 
     const { angleMin, angleMax, periodMs } = this.profile
-    const phase = (this.t % periodMs) / periodMs
 
-    // 用余弦保证起止平滑，无突变
+    // 开始新的一轮
+    if (this.t >= this.repEndT) {
+      this.repStartT = this.t
+      this.repPeriod = periodMs * (0.94 + this.rng() * 0.12)
+      this.repAmp = 0.95 + this.rng() * 0.05
+      this.repEndT = this.t + this.repPeriod
+    }
+
+    const phase = (this.t - this.repStartT) / this.repPeriod
     const angle =
-      angleMin + ((angleMax - angleMin) * (1 - Math.cos(2 * Math.PI * phase))) / 2
+      angleMin + (angleMax - angleMin) * this.repAmp * motionShape(phase)
 
-    // 肌电包络集中在向心收缩期（phase ≈ 0.25），离心期明显减弱 ——
-    // 这与真实膝关节康复动作的肌电模式一致
-    const concentric = Math.exp(-(((phase - 0.25) / 0.12) ** 2) / 2)
-    const eccentric = 0.28 * Math.exp(-(((phase - 0.72) / 0.16) ** 2) / 2)
+    // 肌电包络集中在向心收缩期，离心期明显减弱 —— 与真实膝关节康复动作
+    // 的肌电模式一致。峰值位置对着 motionShape 的屈曲段中点（约 0.20）
+    // 和回落段中点（约 0.76），不是余弦时代那组数
+    const concentric = Math.exp(-(((phase - 0.2) / 0.13) ** 2) / 2)
+    const eccentric = 0.28 * Math.exp(-(((phase - 0.76) / 0.17) ** 2) / 2)
     const envelope = EMG_BASELINE + 0.85 * concentric + 0.85 * eccentric
 
     return { angle, envelope }
@@ -267,10 +375,14 @@ export const SCENARIO_INFO: Record<
 > = {
   rehab: {
     label: '康复训练',
-    detail: '膝关节屈伸动作，4 秒一个循环；肌电在向心收缩期出现爆发',
+    detail:
+      '膝关节屈伸动作，约 4 秒一个循环 —— 较快地屈曲、在最大屈曲位保持一下、' +
+      '再较慢地回落；肌电在向心收缩期出现爆发',
   },
   hotpack: {
     label: '热敷监测',
-    detail: `肢体静止，局部温度 90 秒内由 40 °C 升至 50 °C，跨越 ${TEMP_ALERT_THRESHOLD} °C 预警阈值`,
+    detail:
+      `肢体静止，局部皮温向热敷袋温度指数趋近（约 20 秒越过 ${TEMP_ALERT_THRESHOLD} °C 预警阈值）` +
+      '—— 真实升温是先快后慢，不是匀速',
   },
 }

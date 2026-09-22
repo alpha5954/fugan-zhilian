@@ -33,6 +33,21 @@ export const useAlertStore = defineStore('alert', () => {
   const loading = ref(false)
   const loaded = ref(false)
   const error = ref<string | null>(null)
+  /**
+   * **操作类**失败（增删改、解绑、保存…）。
+   *
+   * 和上面的 `error` 是两个东西，不能混：
+   *
+   *   error    —— 拉取失败。页面把它绑给 StateBlock，展示成整页的
+   *               「加载失败」并把内容替换掉
+   *   opError  —— 用户主动做某件事失败了。界面只需要弹一个 toast，
+   *               **列表内容必须原样留着**
+   *
+   * 混用的后果实际发生过：解绑设备失败时，除了弹出正确的提示，
+   * 整张设备表还被替换成了「加载失败」—— 而其实什么都没加载失败，
+   * 用户看到的是一片空白，以为数据没了。
+   */
+  const opError = ref<string | null>(null)
 
   /**
    * 未处理预警的**精确总数**，由 fetchUnacknowledgedCount() 填充。
@@ -123,14 +138,14 @@ export const useAlertStore = defineStore('alert', () => {
   }
 
   async function create(payload: AlertInsert): Promise<Alert | null> {
-    error.value = null
+    opError.value = null
     const { data, error: err } = await supabase
       .from('alerts')
       .insert(payload)
       .select('*')
 
     if (err) {
-      error.value = toMessage(err, '创建预警失败')
+      opError.value = toMessage(err, '创建预警失败')
       return null
     }
 
@@ -151,7 +166,7 @@ export const useAlertStore = defineStore('alert', () => {
     acknowledged: boolean,
     operatorId: string | null,
   ): Promise<boolean> {
-    error.value = null
+    opError.value = null
 
     const { data, error: err } = await supabase
       .from('alerts')
@@ -163,14 +178,14 @@ export const useAlertStore = defineStore('alert', () => {
       .select('*') // 回读确认
 
     if (err) {
-      error.value = toMessage(err, '标记预警失败')
+      opError.value = toMessage(err, '标记预警失败')
       return false
     }
     // 关键：RLS 对 UPDATE 是静默过滤。无权修改别人的预警时，Supabase
     // 既不返回 error 也不影响任何行。若不回读确认，界面会显示"标记成功"
     // 但刷新后状态又变回去。
     if (!data?.length) {
-      error.value = '标记未生效（无权限或预警不存在）'
+      opError.value = '标记未生效（无权限或预警不存在）'
       return false
     }
 
@@ -190,7 +205,7 @@ export const useAlertStore = defineStore('alert', () => {
   }
 
   async function remove(id: string): Promise<boolean> {
-    error.value = null
+    opError.value = null
     const { data, error: err } = await supabase
       .from('alerts')
       .delete()
@@ -198,11 +213,11 @@ export const useAlertStore = defineStore('alert', () => {
       .select('id')
 
     if (err) {
-      error.value = toMessage(err, '删除预警失败')
+      opError.value = toMessage(err, '删除预警失败')
       return false
     }
     if (!data?.length) {
-      error.value = '删除未生效（无权限或预警不存在）'
+      opError.value = '删除未生效（无权限或预警不存在）'
       return false
     }
 
@@ -222,6 +237,7 @@ export const useAlertStore = defineStore('alert', () => {
     loading,
     loaded,
     error,
+    opError,
     unacknowledgedTotal,
     unacknowledgedCount,
     criticalCount,

@@ -22,6 +22,21 @@ export const useCareStore = defineStore('care', () => {
   const loading = ref(false)
   const loaded = ref(false)
   const error = ref<string | null>(null)
+  /**
+   * **操作类**失败（增删改、解绑、保存…）。
+   *
+   * 和上面的 `error` 是两个东西，不能混：
+   *
+   *   error    —— 拉取失败。页面把它绑给 StateBlock，展示成整页的
+   *               「加载失败」并把内容替换掉
+   *   opError  —— 用户主动做某件事失败了。界面只需要弹一个 toast，
+   *               **列表内容必须原样留着**
+   *
+   * 混用的后果实际发生过：解绑设备失败时，除了弹出正确的提示，
+   * 整张设备表还被替换成了「加载失败」—— 而其实什么都没加载失败，
+   * 用户看到的是一片空白，以为数据没了。
+   */
+  const opError = ref<string | null>(null)
 
   const me = computed(() => user.userId)
 
@@ -144,7 +159,7 @@ export const useCareStore = defineStore('care', () => {
     code: string,
     relation: CareRelation = 'family',
   ): Promise<CareLinkRequestResult> {
-    error.value = null
+    opError.value = null
 
     const { data, error: err } = await supabase.rpc('request_care_link', {
       // 手输的码容易带空格或写成小写，这里先规整；服务端也会再处理一次
@@ -153,8 +168,8 @@ export const useCareStore = defineStore('care', () => {
     })
 
     if (err) {
-      error.value = toMessage(err, '提交申请失败')
-      return { ok: false, reason: 'not_authenticated', message: error.value }
+      opError.value = toMessage(err, '提交申请失败')
+      return { ok: false, reason: 'not_authenticated', message: opError.value }
     }
 
     const result = data as CareLinkRequestResult
@@ -175,7 +190,7 @@ export const useCareStore = defineStore('care', () => {
     linkId: string,
     status: 'active' | 'revoked',
   ): Promise<boolean> {
-    error.value = null
+    opError.value = null
 
     const { data, error: err } = await supabase
       .from('care_links')
@@ -184,11 +199,11 @@ export const useCareStore = defineStore('care', () => {
       .select('*') // 回读确认：RLS 对 UPDATE 是静默过滤，无权限时不报错也不影响行
 
     if (err) {
-      error.value = toMessage(err, '操作失败')
+      opError.value = toMessage(err, '操作失败')
       return false
     }
     if (!data?.length) {
-      error.value = '操作未生效（无权限或关系不存在）'
+      opError.value = '操作未生效（无权限或关系不存在）'
       return false
     }
 
@@ -218,6 +233,7 @@ export const useCareStore = defineStore('care', () => {
     loading,
     loaded,
     error,
+    opError,
 
     incoming,
     outgoing,

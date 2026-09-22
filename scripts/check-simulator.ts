@@ -25,6 +25,24 @@ const fmt = (r: { min: number; max: number }, d = 2) =>
   `${r.min.toFixed(d)} ~ ${r.max.toFixed(d)}`
 
 // ---------------------------------------------------------------- 康复训练
+// ⚠️ 先查一遍有没有 NaN。数值 bug 最阴的地方就是它不报错 ——
+// 图表只是画不出来，没人会想到是数据里混了 NaN。
+// 这个断言实际抓到过一次：应变分量用幂函数做非线性映射，对负底数返回 NaN，
+// 而"角度小于下限"是常态（热敷静止角 4°、直腿抬高下限 2°）。
+{
+  const probe = run('rehab', 20).concat(run('hotpack', 30))
+  const bad = probe.flatMap((s) =>
+    Object.entries(s)
+      .filter(([, v]) => typeof v === 'number' && !Number.isFinite(v))
+      .map(([k]) => k),
+  )
+  check(
+    '所有采样值都是有限数（没有 NaN / Infinity）',
+    bad.length === 0,
+    [...new Set(bad)].join(', ') || '',
+  )
+}
+
 console.log('='.repeat(66));
 console.log('场景一：康复训练');
 console.log('='.repeat(66));
@@ -81,7 +99,28 @@ const hTemp = range(hot.map((s) => s.temp))
 const hEmg = range(hot.map((s) => Math.abs(s.emg)))
 
 check('肢体静止，角度基本不变', hAngle.max - hAngle.min < 2, fmt(hAngle, 2))
-check('温度由 40 升至 50°C', hTemp.min > 39.5 && hTemp.max > 49.5, fmt(hTemp))
+check(
+  '温度从 40°C 起步、向 50°C 渐近（不是匀速升到）',
+  hTemp.min > 39.5 && hTemp.max > 49.5,
+  fmt(hTemp),
+)
+
+// 指数趋近的特征：**前段快、后段慢**。线性升温没有这个性质，
+// 所以这条断言能区分两种实现 —— 改回线性它会失败
+{
+  // ⚠️ 采样是每 100ms 一个点（run 的 tickMs 默认值），所以下标要乘 10。
+  //    写成 hot[sec] 的话取到的是第 sec 个**采样点**，也就是第 sec/10 秒 ——
+  //    第一次写就是这么错的，算出来"前 20 秒只升了 0.71°C"。
+  const at = (sec: number) =>
+    hot[Math.min(hot.length - 1, Math.round(sec * 10))].temp
+  const firstHalf = at(20) - at(0) // 前 20 秒
+  const secondHalf = at(60) - at(40) // 中间 20 秒
+  check(
+    '升温先快后慢（指数趋近，不是线性）',
+    firstHalf > secondHalf * 1.5,
+    `前 20 秒升 ${firstHalf.toFixed(2)}°C，中段 20 秒升 ${secondHalf.toFixed(2)}°C`,
+  )
+}
 check('肌电维持基线水平（无主动收缩）', hEmg.max < 0.1, `峰值 ${hEmg.max.toFixed(3)} mV`)
 
 const crossed = hot.filter((s) => s.temp >= TEMP_ALERT_THRESHOLD)

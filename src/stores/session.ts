@@ -43,6 +43,21 @@ export const useSessionStore = defineStore('session', () => {
   const loading = ref(false)
   const loaded = ref(false)
   const error = ref<string | null>(null)
+  /**
+   * **操作类**失败（增删改、解绑、保存…）。
+   *
+   * 和上面的 `error` 是两个东西，不能混：
+   *
+   *   error    —— 拉取失败。页面把它绑给 StateBlock，展示成整页的
+   *               「加载失败」并把内容替换掉
+   *   opError  —— 用户主动做某件事失败了。界面只需要弹一个 toast，
+   *               **列表内容必须原样留着**
+   *
+   * 混用的后果实际发生过：解绑设备失败时，除了弹出正确的提示，
+   * 整张设备表还被替换成了「加载失败」—— 而其实什么都没加载失败，
+   * 用户看到的是一片空白，以为数据没了。
+   */
+  const opError = ref<string | null>(null)
 
   /** 按开始时间倒序，最近一次在最前 */
   const latest = computed(() => sessions.value[0] ?? null)
@@ -123,14 +138,14 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function create(payload: RehabSessionInsert): Promise<RehabSession | null> {
-    error.value = null
+    opError.value = null
     const { data, error: err } = await supabase
       .from('rehab_sessions')
       .insert(payload)
       .select('*')
 
     if (err) {
-      error.value = toMessage(err, '保存训练记录失败')
+      opError.value = toMessage(err, '保存训练记录失败')
       return null
     }
 
@@ -140,7 +155,7 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function update(id: string, patch: RehabSessionUpdate): Promise<boolean> {
-    error.value = null
+    opError.value = null
     const { data, error: err } = await supabase
       .from('rehab_sessions')
       .update(patch)
@@ -148,11 +163,11 @@ export const useSessionStore = defineStore('session', () => {
       .select('*')
 
     if (err) {
-      error.value = toMessage(err, '更新训练记录失败')
+      opError.value = toMessage(err, '更新训练记录失败')
       return false
     }
     if (!data?.length) {
-      error.value = '更新未生效（无权限或记录不存在）'
+      opError.value = '更新未生效（无权限或记录不存在）'
       return false
     }
 
@@ -162,7 +177,7 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function remove(id: string): Promise<boolean> {
-    error.value = null
+    opError.value = null
     const { data, error: err } = await supabase
       .from('rehab_sessions')
       .delete()
@@ -170,11 +185,11 @@ export const useSessionStore = defineStore('session', () => {
       .select('id')
 
     if (err) {
-      error.value = toMessage(err, '删除训练记录失败')
+      opError.value = toMessage(err, '删除训练记录失败')
       return false
     }
     if (!data?.length) {
-      error.value = '删除未生效（无权限或记录不存在）'
+      opError.value = '删除未生效（无权限或记录不存在）'
       return false
     }
 
@@ -194,6 +209,7 @@ export const useSessionStore = defineStore('session', () => {
     loading,
     loaded,
     error,
+    opError,
     latest,
     todayTotal,
     todayCount,
