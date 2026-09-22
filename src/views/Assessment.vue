@@ -12,9 +12,9 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import BarChart from '@/components/BarChart.vue'
+import FindingCard from '@/components/FindingCard.vue'
 import type { BarSeries } from '@/components/BarChart.vue'
 import PhaseChart from '@/components/PhaseChart.vue'
-import RiskBadge from '@/components/RiskBadge.vue'
 import {
   REHAB_EXERCISES,
   generateSession,
@@ -347,19 +347,7 @@ watch(() => care.viewingPatientId, loadHistory)
         </header>
 
         <div v-if="result" class="findings">
-          <article
-            v-for="f in visibleFindings"
-            :key="f.key"
-            class="finding"
-            :class="`finding--${f.band}`"
-          >
-            <p class="finding__label">
-              <RiskBadge :band="f.band" dot size="sm" />
-              <span>{{ f.label }}</span>
-            </p>
-            <p class="finding__evidence">{{ f.evidence }}</p>
-            <p class="finding__action">{{ f.action }}</p>
-          </article>
+          <FindingCard v-for="f in visibleFindings" :key="f.key" :finding="f" />
 
           <!-- 其余折起来。一次列五条并列的结论，用户会全部略过 -->
           <template v-if="hiddenFindings.length">
@@ -373,19 +361,7 @@ watch(() => care.viewingPatientId, loadHistory)
             </button>
 
             <template v-if="findingsOpen">
-              <article
-                v-for="f in hiddenFindings"
-                :key="f.key"
-                class="finding"
-                :class="`finding--${f.band}`"
-              >
-                <p class="finding__label">
-                  <RiskBadge :band="f.band" dot size="sm" />
-                  <span>{{ f.label }}</span>
-                </p>
-                <p class="finding__evidence">{{ f.evidence }}</p>
-                <p class="finding__action">{{ f.action }}</p>
-              </article>
+              <FindingCard v-for="f in hiddenFindings" :key="f.key" :finding="f" />
             </template>
           </template>
         </div>
@@ -939,55 +915,8 @@ watch(() => care.viewingPatientId, loadHistory)
   gap: 10px;
 }
 
-.finding {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 11px 14px;
-  border-radius: var(--r-sm);
-  border-left: 3px solid var(--ink-200);
-  background: var(--surface-sunken);
-}
-
-.finding--red {
-  border-left-color: var(--danger);
-  background: var(--danger-bg);
-}
-
-.finding--yellow {
-  border-left-color: var(--warn);
-  background: var(--warn-bg);
-}
-
-.finding--green {
-  border-left-color: var(--ok);
-  background: var(--ok-bg);
-}
-
-.finding__label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  font-size: var(--fs-md);
-  font-weight: var(--fw-medium);
-  color: var(--ink-800);
-}
-
-.finding__evidence {
-  margin: 1px 0 0;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-base);
-  color: var(--ink-400);
-}
-
-.finding__action {
-  margin: 3px 0 0;
-  font-size: var(--fs-sm);
-  line-height: var(--lh-base);
-  color: var(--ink-600);
-}
-
+/* .finding* 的样式搬到了 components/FindingCard.vue —— 分析页
+   也要显示同一套结论，两页各写一份必然漂开 */
 .findings__more {
   align-self: flex-start;
   padding: 0;

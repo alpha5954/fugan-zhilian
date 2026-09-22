@@ -9,7 +9,9 @@ import { computed, onMounted, ref, watch } from 'vue'
 
 import BarChart from '@/components/BarChart.vue'
 import type { BarSeries } from '@/components/BarChart.vue'
+import FindingCard from '@/components/FindingCard.vue'
 import PieChart from '@/components/PieChart.vue'
+import RiskBadge from '@/components/RiskBadge.vue'
 import SignalChart from '@/components/SignalChart.vue'
 import type { ChartSeries } from '@/components/SignalChart.vue'
 import StateBlock from '@/components/StateBlock.vue'
@@ -24,9 +26,11 @@ import {
 import { REHAB_EXERCISES } from '@/lib/assessment'
 import { seriesColor } from '@/lib/chartTheme'
 import { formatDateTime } from '@/lib/format'
+import { TOP_FINDINGS } from '@/lib/scoreConfig'
 import { useCareStore } from '@/stores/care'
 import { useSessionStore } from '@/stores/session'
 import { token } from '@/lib/theme'
+import { DIRECTION_LABEL, buildTrendReport } from '@/lib/trend'
 
 const sessions = useSessionStore()
 const care = useCareStore()
@@ -101,6 +105,31 @@ const filtered = computed(() =>
 
 const summary = computed(() => summarize(filtered.value))
 const trend = computed(() => buildTrendByExercise(filtered.value))
+
+// ---------------------------------------------------------------------------
+// 结论
+// ---------------------------------------------------------------------------
+// 【为什么这一页需要结论层】
+// 原先这里从「六个数字」直接跳到「四张图」，中间一句人话都没有 ——
+// 用户得自己把曲线翻译成"在进步还是停滞"。而导出 PDF 走 window.print()，
+// 所以拿出去的报告也是四张图加六个数，没人看得出说明什么。
+//
+// 【它和另外两页的分工】
+// 首页说"本周恢复得怎么样"（一个加权分数），评估页说"这一次做得怎么样"。
+// 这一页说"所选窗口内，**每个动作分别**往哪个方向走" —— 这是另外两页
+// 都给不出的。所以 trend.ts 刻意不算分数、不评价单次，避免成为第三次复读。
+const trendReport = computed(() =>
+  buildTrendReport(filtered.value, { days: rangeDays.value }),
+)
+
+/** 结论条目也限流 —— 一次列五条并列的，用户会全部略过 */
+const findingsOpen = ref(false)
+const visibleFindings = computed(() =>
+  trendReport.value.findings.slice(0, TOP_FINDINGS),
+)
+const hiddenFindings = computed(() =>
+  trendReport.value.findings.slice(TOP_FINDINGS),
+)
 const compare = computed(() => compareExercises(filtered.value))
 const temperature = computed(() => buildTemperatureHistory(filtered.value))
 const distribution = computed(() => buildExerciseDistribution(filtered.value))
@@ -254,6 +283,78 @@ onMounted(load)
       empty-text="所选范围内还没有训练记录。去「康复评估」记录一次训练，或放宽筛选范围。"
       @retry="load"
     >
+      <!-- ================= 结论 =================
+           放在概要条和图表**之前**：先结论、后依据、再明细。
+           这是「康复评估」页那次教训的直接应用 —— 那一页的结论原先排在
+           页面 82% 处，要滚到底才看得到，而它是全页最重要的产出 -->
+      <section class="panel panel--conclusion">
+        <header class="panel__head">
+          <h2 class="panel__title">这段时间的结论</h2>
+          <span class="panel__unit">
+            {{ trendReport.windowLabel }} · 依据训练记录自动生成
+          </span>
+        </header>
+
+        <p class="conclusion__headline">{{ trendReport.headline }}</p>
+
+        <!-- 短窗口提示。7 天最多 7 个数据点，而一天只练一个动作的话
+             每个动作还分不到 4 天，算出来的方向主要是噪声 ——
+             不提示的话用户会拿三五天的数据当趋势 -->
+        <p v-if="trendReport.shortWindow" class="conclusion__hint" role="note">
+          <span aria-hidden="true">ⓘ</span>
+          {{ trendReport.windowLabel }}的跨度较短，趋势判断的参考价值有限。
+          想看方向建议选「近 30 天」或更长。
+        </p>
+
+        <!-- 逐动作的方向。**这一页独有的产出** —— 首页只给一个加权分数，
+             评估页只看单次，都说不出"哪个动作在进步、哪个卡住了" -->
+        <ul v-if="trendReport.items.length" class="trendlist">
+          <li
+            v-for="it in trendReport.items"
+            :key="it.exercise"
+            class="trendlist__item"
+          >
+            <RiskBadge :band="it.band" dot size="sm" />
+            <span class="trendlist__name">{{ it.exercise }}</span>
+            <span class="trendlist__dir">{{ DIRECTION_LABEL[it.direction] }}</span>
+            <span class="trendlist__nums">
+              {{ it.before.toFixed(1) }}° → {{ it.after.toFixed(1) }}°
+            </span>
+            <span class="trendlist__meta">
+              {{ it.metricName }} · 目标 {{ it.target }}° · {{ it.points }} 天
+            </span>
+          </li>
+        </ul>
+
+        <!-- 结论条目。与评估页共用 FindingCard，两页长得一样 -->
+        <div v-if="trendReport.findings.length" class="findings">
+          <FindingCard
+            v-for="f in visibleFindings"
+            :key="f.key"
+            :finding="f"
+          />
+
+          <template v-if="hiddenFindings.length">
+            <button
+              type="button"
+              class="findings__more"
+              :aria-expanded="findingsOpen"
+              @click="findingsOpen = !findingsOpen"
+            >
+              {{ findingsOpen ? '收起' : `另有 ${hiddenFindings.length} 条` }}
+            </button>
+
+            <template v-if="findingsOpen">
+              <FindingCard
+                v-for="f in hiddenFindings"
+                :key="f.key"
+                :finding="f"
+              />
+            </template>
+          </template>
+        </div>
+      </section>
+
       <!-- 概要 -->
       <section class="summary">
         <div class="summary__item">
@@ -270,7 +371,12 @@ onMounted(load)
         </div>
         <div class="summary__item">
           <span class="summary__label">活动度达标</span>
-          <p class="summary__value">{{ summary.onTargetCount }}</p>
+          <!-- 光给一个「8」读不出分母 —— 是 8 次达标，还是达标率 8%？
+               补上总数才是个能用的数 -->
+          <p class="summary__value">
+            {{ summary.onTargetCount
+            }}<span class="summary__of"> / {{ summary.totalSessions }} 次</span>
+          </p>
         </div>
         <div
           class="summary__item"
@@ -494,6 +600,122 @@ onMounted(load)
 .panel__unit {
   font-size: 12px;
   color: var(--ink-300);
+}
+
+/* ==========================================================================
+   结论
+   ==========================================================================
+   这一块是这一页最重要的产出，所以给它比普通图表面板更强的存在感：
+   左侧一道品牌色竖条。不用大面积底色 —— 那会让"结论"看起来像"警告"，
+   而结论里大部分是正常信息。
+   ========================================================================== */
+.panel--conclusion {
+  border-left: 3px solid var(--brand-700);
+}
+
+.conclusion__headline {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: var(--lh-base);
+  color: var(--ink-800);
+}
+
+/* 短窗口提示。做成中性信息条 —— 这不是错误，是如实说明可信度 */
+.conclusion__hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--info-line);
+  border-radius: var(--r-sm);
+  background: var(--info-bg);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-base);
+  color: var(--ink-600);
+}
+
+/* ---------- 逐动作方向 ----------
+   一行一个动作：灯 / 名字 / 方向 / 起止 / 说明。
+   这是分析页独有的产出，所以给它独立的视觉块，不和结论条目混在一起 */
+.trendlist {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+.trendlist__item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-sunken);
+  font-size: var(--fs-sm);
+}
+
+/* 斑马纹：五行以上时靠它才扫得清哪一格对哪一行 */
+.trendlist__item:nth-child(even) {
+  background: var(--surface);
+}
+
+.trendlist__name {
+  min-width: 5em;
+  font-weight: var(--fw-medium);
+  color: var(--ink-800);
+}
+
+.trendlist__dir {
+  color: var(--ink-600);
+}
+
+.trendlist__nums {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-700);
+}
+
+.trendlist__meta {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--ink-400);
+}
+
+/* ---------- 结论条目 ----------
+   .finding* 本身在 components/FindingCard.vue 里，这里只放容器 */
+.findings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.findings__more {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--brand-700);
+  cursor: pointer;
+}
+
+.findings__more:hover {
+  text-decoration: underline;
+}
+
+/* 概要条里「8 / 12 次」的分数部分 —— 比主数字弱一档 */
+.summary__of {
+  margin-left: 2px;
+  font-size: 12px;
+  font-weight: var(--fw-normal);
+  color: var(--ink-400);
 }
 
 .panel__legend {

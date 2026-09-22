@@ -59,7 +59,19 @@ import type { RehabSession } from '@/types'
 // 类型
 // ---------------------------------------------------------------------------
 
+/**
+ * 结论的唯一标识。**这是全套结论层的公共词汇表**，不只是本模块的。
+ *
+ * 前缀区分来源：
+ *   （无前缀） 评估页 —— 单次训练得出的结论（lib/findings.ts）
+ *   trend_     分析页 —— 一段时间内逐动作的趋势结论（lib/trend.ts）
+ *
+ * 放在这里是因为 Finding 这个类型定义在这里，键跟着类型走。
+ * 分层不另立词汇表 —— 同一个意思在不同页面上应当叫同一个名字，
+ * 否则家属在两页之间来回看会发现"说的是不是一回事"。
+ */
 export type FindingKey =
+  // ---- 评估页：单次训练 ----
   | 'temp_high'
   | 'recognition_mismatch'
   | 'rom_short'
@@ -74,6 +86,14 @@ export type FindingKey =
   | 'fatigue_rising'
   | 'progress_up'
   | 'progress_flat'
+  // ---- 分析页：一段时间内的趋势 ----
+  | 'trend_temp_over'
+  | 'trend_stuck'
+  | 'trend_down'
+  | 'trend_low_adherence'
+  | 'trend_low_confidence'
+  | 'trend_up'
+  | 'trend_flat_all'
 
 export interface Finding {
   key: FindingKey
