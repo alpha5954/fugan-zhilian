@@ -8,6 +8,8 @@
 // 以及这套软件系统（做了什么、数据从哪来、哪些环节已真实对接后端）。
 // 后者刻意写得具体 —— 把模拟数据说成实测数据，在答辩时经不起追问。
 // ============================================================================
+import { ArrowRight } from 'lucide-vue-next'
+
 import { RouterLink } from 'vue-router'
 
 import {
@@ -158,7 +160,10 @@ const MODULE_STATUS = [
     <!-- ================= 入口 ================= -->
     <section class="cta">
       <p class="cta__text">系统功能需要登录后使用。</p>
-      <RouterLink to="/login" class="cta__link">前往登录 / 注册 →</RouterLink>
+      <RouterLink to="/login" class="cta__link">
+        前往登录 / 注册
+        <ArrowRight class="cta__arrow" aria-hidden="true" />
+      </RouterLink>
     </section>
   </div>
 </template>
@@ -441,6 +446,13 @@ const MODULE_STATUS = [
   border-radius: var(--r-md);
   font-size: 13px;
   color: var(--ink-400);
+}
+
+/* 入口箭头。跟着文字走 */
+.cta__arrow {
+  width: 14px;
+  height: 14px;
+  vertical-align: -3px;
 }
 
 .cta__link {

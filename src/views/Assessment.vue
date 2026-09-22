@@ -12,6 +12,8 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import BarChart from '@/components/BarChart.vue'
+import { TriangleAlert } from 'lucide-vue-next'
+
 import FindingCard from '@/components/FindingCard.vue'
 import type { BarSeries } from '@/components/BarChart.vue'
 import PhaseChart from '@/components/PhaseChart.vue'
@@ -389,7 +391,8 @@ watch(() => care.viewingPatientId, loadHistory)
               v-if="result.recognized !== result.performed"
               class="recognize__mismatch"
             >
-              ⚠ 与所选动作「{{ result.performed }}」不一致，动作可能不够标准
+              <TriangleAlert class="recognize__warn" aria-hidden="true" />
+              与所选动作「{{ result.performed }}」不一致，动作可能不够标准
             </p>
           </div>
 
@@ -707,6 +710,13 @@ watch(() => care.viewingPatientId, loadHistory)
   font-size: 12px;
   line-height: 1.6;
   color: var(--warn);
+}
+
+/* 识别不一致的警示图标。跟着文字基线走 */
+.recognize__warn {
+  width: 13px;
+  height: 13px;
+  vertical-align: -2px;
 }
 
 .recognize__bars {

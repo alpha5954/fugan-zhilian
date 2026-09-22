@@ -131,11 +131,32 @@ export interface ScorePart {
   weakest?: { exercise: string; actual: number; target: number }
 }
 
+/**
+ * 卡片的图标标识。
+ *
+ * ⚠️ **是名字，不是图形。** 这一层是纯函数模块，能被 node 直接跑
+ *    （见 scripts/check-insight.ts），**不能 import Vue 组件**。
+ *    所以这里只给标识，由视图映射成具体的图标组件
+ *    （见 Dashboard.vue 的 CARD_ICON）。
+ *
+ * 原先这里存的是 emoji 字面量（'📋' / '🛡️' / '💡'）。那种做法把
+ * "显示什么"和"长什么样"混在了一起 —— 换图标库要改到算法层来。
+ */
+export type SummaryIcon =
+  /** 今天做了什么 */
+  | 'clipboard'
+  /** 一切正常 */
+  | 'shield-check'
+  /** 有需要注意的 */
+  | 'triangle-alert'
+  /** 下一步该做什么 */
+  | 'lightbulb'
+
 /** 首页那三张家属语言卡片 */
 export interface SummaryCard {
   key: 'today' | 'risk' | 'advice'
-  /** 一个 emoji，家属扫一眼就知道是哪一类 */
-  icon: string
+  /** 图标标识。理由见 SummaryIcon */
+  icon: SummaryIcon
   title: string
   /** 一句话结论，尽量短 */
   headline: string
@@ -646,7 +667,7 @@ function todayCard(
   if (!today.length) {
     return {
       key: 'today',
-      icon: '📋',
+      icon: 'clipboard',
       title: '今天的康复情况',
       headline: '今天还没有训练记录',
       detail: '建议按康复方案完成今天的训练',
@@ -659,7 +680,7 @@ function todayCard(
 
   return {
     key: 'today',
-    icon: '📋',
+    icon: 'clipboard',
     title: '今天的康复情况',
     headline: `今天完成了 ${today.length} 次训练，共 ${reps} 组`,
     detail:
@@ -676,7 +697,7 @@ function riskCard(weekAlerts: Alert[]): SummaryCard {
   if (!weekAlerts.length) {
     return {
       key: 'risk',
-      icon: '🛡️',
+      icon: 'shield-check',
       title: '有没有需要注意的',
       headline: '本周没有异常',
       detail: '温度和信号都在正常范围内',
@@ -697,7 +718,7 @@ function riskCard(weekAlerts: Alert[]): SummaryCard {
 
   return {
     key: 'risk',
-    icon: '⚠️',
+    icon: 'triangle-alert',
     title: '有没有需要注意的',
     headline: `${describeAlert(worst)}${extra}`,
     detail: `${alertAdvice(worst)}${suffix}`,
@@ -786,9 +807,10 @@ function adviceFor(
   weekAlerts: Alert[],
   stats: Insight['stats'],
 ): SummaryCard {
-  const base = {
-    key: 'advice' as const,
-    icon: '💡',
+  // 标注类型，否则 'lightbulb' 会被推断成 string 而收窄不到 SummaryIcon
+  const base: Pick<SummaryCard, 'key' | 'icon' | 'title'> = {
+    key: 'advice',
+    icon: 'lightbulb',
     title: '下一步建议',
   }
 

@@ -9,6 +9,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 
 import BarChart from '@/components/BarChart.vue'
 import type { BarSeries } from '@/components/BarChart.vue'
+import { Info } from 'lucide-vue-next'
+
 import DemoNotice from '@/components/DemoNotice.vue'
 import FindingCard from '@/components/FindingCard.vue'
 import PieChart from '@/components/PieChart.vue'
@@ -351,7 +353,7 @@ onMounted(load)
              每个动作还分不到 4 天，算出来的方向主要是噪声 ——
              不提示的话用户会拿三五天的数据当趋势 -->
         <p v-if="trendReport.shortWindow" class="conclusion__hint" role="note">
-          <span aria-hidden="true">ⓘ</span>
+          <Info class="conclusion__hint-icon" aria-hidden="true" />
           {{ trendReport.windowLabel }}的跨度较短，趋势判断的参考价值有限。
           想看方向建议选「近 30 天」或更长。
         </p>
@@ -669,6 +671,14 @@ onMounted(load)
    ========================================================================== */
 .panel--conclusion {
   border-left: 3px solid var(--brand-700);
+}
+
+/* 提示条里的信息图标。和首行对齐，不跟着行高往下掉 */
+.conclusion__hint-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
 }
 
 .conclusion__headline {

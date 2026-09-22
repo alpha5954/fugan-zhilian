@@ -23,6 +23,8 @@ import { RouterLink, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormItemRule } from 'element-plus'
 
+import { ArrowRight } from 'lucide-vue-next'
+
 import AuthShell from '@/components/AuthShell.vue'
 import { useUserStore } from '@/stores/user'
 
@@ -164,7 +166,8 @@ async function handleCancel() {
       <h2 class="title">{{ BLOCK_TEXT[blockReason].title }}</h2>
       <p class="desc">{{ BLOCK_TEXT[blockReason].desc }}</p>
       <RouterLink to="/login" class="action">
-        {{ blockReason === 'direct' ? '去登录页 →' : '重新申请一封 →' }}
+        {{ blockReason === 'direct' ? '去登录页' : '重新申请一封' }}
+        <ArrowRight class="action__icon" aria-hidden="true" />
       </RouterLink>
     </template>
 
@@ -253,6 +256,13 @@ async function handleCancel() {
   font-size: var(--fs-xl);
   font-weight: var(--fw-semibold);
   color: var(--ink-800);
+}
+
+/* 出口箭头。跟着文字走 */
+.action__icon {
+  width: 13px;
+  height: 13px;
+  vertical-align: -2px;
 }
 
 .desc {

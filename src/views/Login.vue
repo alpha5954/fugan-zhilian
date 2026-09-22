@@ -17,6 +17,8 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormItemRule } from 'element-plus'
 
+import { ArrowLeft } from 'lucide-vue-next'
+
 import AuthShell from '@/components/AuthShell.vue'
 import { useUserStore } from '@/stores/user'
 
@@ -496,14 +498,16 @@ const needsEmailConfirmation = computed(
         class="back"
         @click="mode = 'signin'"
       >
-        ← 返回登录
+        <ArrowLeft class="back__icon" aria-hidden="true" /> 返回登录
       </button>
     </el-form>
 
     <!-- 进来之后总要能出去。这个页面是导航栏那个「登录 / 注册」按钮送进来的，
          没有返回入口的话，改主意的访客就只剩关标签页这一条路 -->
     <p class="foot">
-      <RouterLink to="/monitor">← 返回应用</RouterLink>
+      <RouterLink to="/monitor">
+        <ArrowLeft class="foot__icon" aria-hidden="true" /> 返回应用
+      </RouterLink>
       <span class="foot__sep">·</span>
       <RouterLink to="/about">项目介绍</RouterLink>
     </p>
@@ -683,6 +687,15 @@ const needsEmailConfirmation = computed(
 
 .back:hover {
   color: var(--ink-700);
+}
+
+/* 返回箭头。跟着文字基线走，别用 flex —— 这两个在 <a> 里，
+   换行时 flex 会让箭头单独占一行 */
+.back__icon,
+.foot__icon {
+  width: 13px;
+  height: 13px;
+  vertical-align: -2px;
 }
 
 .foot {

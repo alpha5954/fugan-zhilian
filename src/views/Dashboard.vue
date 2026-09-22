@@ -20,15 +20,29 @@
 //
 // 换言之：**结论要简单，依据要完整**。这两件事不矛盾。
 // ============================================================================
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch, type Component } from 'vue'
 import { RouterLink } from 'vue-router'
+
+import {
+  ArrowRight,
+  ChevronDown,
+  ClipboardList,
+  Lightbulb,
+  ShieldCheck,
+  TriangleAlert,
+} from 'lucide-vue-next'
 
 import DemoNotice from '@/components/DemoNotice.vue'
 import RiskBadge from '@/components/RiskBadge.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import { buildDemoAlerts, buildDemoSessions } from '@/lib/demoData'
 import { useCountUp } from '@/composables/useCountUp'
-import { buildInsight, type Insight, type SummaryCard } from '@/lib/insight'
+import {
+  buildInsight,
+  type Insight,
+  type SummaryCard,
+  type SummaryIcon,
+} from '@/lib/insight'
 import { SCORE_DISCLAIMER } from '@/lib/scoreConfig'
 import { useAlertStore } from '@/stores/alert'
 import { useCareStore } from '@/stores/care'
@@ -61,6 +75,19 @@ const CARD_LINK: Record<SummaryCard['key'], { to: string; text: string }> = {
   today: { to: '/assessment', text: '去做一次评估' },
   risk: { to: '/alerts', text: '查看预警记录' },
   advice: { to: '/analysis', text: '查看数据分析' },
+}
+
+/**
+ * 图标标识 → 图标组件。
+ *
+ * 结论层（insight.ts）只给名字不给图形 —— 那一层是纯函数，跑在 node 里，
+ * 碰不到 Vue。映射放在视图这一层。
+ */
+const CARD_ICON: Record<SummaryIcon, Component> = {
+  clipboard: ClipboardList,
+  'shield-check': ShieldCheck,
+  'triangle-alert': TriangleAlert,
+  lightbulb: Lightbulb,
 }
 
 /** 把调整量写成给人看的样子。负号用真正的减号 U+2212，不是连字符 */
@@ -250,7 +277,8 @@ onMounted(reload)
           :key="i"
           class="score__adj-item"
         >
-          <span aria-hidden="true">⚠</span> {{ adj.text }}
+          <TriangleAlert class="score__adj-icon" aria-hidden="true" />
+          {{ adj.text }}
           <strong class="score__adj-delta">{{ signed(adj.delta) }}</strong>
         </p>
         <p v-if="insight.rawScore !== insight.score" class="score__adj-raw">
@@ -274,7 +302,7 @@ onMounted(reload)
         :class="`fcard--${card.band}`"
       >
         <div class="fcard__head">
-          <span class="fcard__icon" aria-hidden="true">{{ card.icon }}</span>
+          <component :is="CARD_ICON[card.icon]" class="fcard__icon" aria-hidden="true" />
           <h2 class="fcard__title">{{ card.title }}</h2>
           <RiskBadge :band="card.band" dot size="sm" />
         </div>
@@ -284,7 +312,7 @@ onMounted(reload)
              也不知道下一步该点哪里 -->
         <RouterLink :to="CARD_LINK[card.key].to" class="fcard__link">
           {{ CARD_LINK[card.key].text }}
-          <span aria-hidden="true">→</span>
+          <ArrowRight class="fcard__arrow" aria-hidden="true" />
         </RouterLink>
       </article>
     </section>
@@ -298,9 +326,11 @@ onMounted(reload)
         @click="detailOpen = !detailOpen"
       >
         <span>{{ detailOpen ? '收起详细数据' : '查看详细数据' }}</span>
-        <span class="detail__chevron" :class="{ 'is-open': detailOpen }" aria-hidden="true">
-          ▾
-        </span>
+        <ChevronDown
+          class="detail__chevron"
+          :class="{ 'is-open': detailOpen }"
+          aria-hidden="true"
+        />
       </button>
 
       <div v-if="detailOpen" class="detail__body">
@@ -516,10 +546,21 @@ onMounted(reload)
 }
 
 .score__adj-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-base);
   color: var(--warn);
+}
+
+/* 与首行文字对齐：图标略小一圈，靠上对齐才不会显得吊在中间 */
+.score__adj-icon {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  margin-top: 3px;
 }
 
 .score__adj-raw {
@@ -616,8 +657,10 @@ onMounted(reload)
 }
 
 .fcard__icon {
-  font-size: var(--fs-lg);
-  line-height: 1;
+  flex-shrink: 0;
+  width: 17px;
+  height: 17px;
+  color: var(--ink-400);
 }
 
 .fcard__title {
@@ -656,6 +699,13 @@ onMounted(reload)
 
 .fcard__link:hover {
   text-decoration: underline;
+}
+
+/* 箭头跟着文字走，垂在基线上 */
+.fcard__arrow {
+  width: 13px;
+  height: 13px;
+  vertical-align: -2px;
 }
 
 /* 红黄两档给整张卡一道左色条。绿档不给 —— 一切都好时不需要被强调 */
@@ -701,8 +751,9 @@ onMounted(reload)
 }
 
 .detail__chevron {
-  display: inline-block;
-  font-size: var(--fs-md);
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
   color: var(--ink-300);
   transition: transform 0.2s;
 }
