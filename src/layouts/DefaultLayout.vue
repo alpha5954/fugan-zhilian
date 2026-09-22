@@ -407,6 +407,23 @@ async function handleCommand(command: string) {
 .topbar__right {
   flex-shrink: 0;
   margin-left: auto;
+  /* ⚠️ 这两行是为了修**垂直偏移**，不是排版偏好。
+   *
+   * Element Plus 把 `.el-dropdown` 设成 `display: inline-flex` +
+   * `vertical-align: top` —— 一个**行内级**元素。而 `.topbar__right` 是块级、
+   * 继承了 20.8px 的行高，于是形成一个 20.8px 的行盒：顶栏把它居中了，
+   * 但下拉里只有 13px 的内容、还被 `vertical-align: top` 顶着行盒的**上沿**，
+   * 结果用户名比导航链接高 3.9px —— 正好是 (20.8 − 13) / 2。
+   *
+   * 实测：`.topbar__right` 的 mid 是 25.5（和导航一致），但它内部的
+   * `.account` 是 21.6。**光看外层量不出来**，得往里走一层。
+   *
+   * 改成 flex 容器之后，`.el-dropdown` 从"行内元素"变成"flex item"，
+   * 直接被 `align-items: center` 居中，不再受行盒与 vertical-align 的影响。
+   * 比去覆盖 Element Plus 的 `vertical-align` 稳 —— 那是它的内部实现，
+   * 版本一变就可能失效。 */
+  display: flex;
+  align-items: center;
 }
 
 .account {
