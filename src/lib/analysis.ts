@@ -146,12 +146,23 @@ export function compareExercises(sessions: RehabSession[]): CompareResult {
     sessions.some((s) => s.exercise === e),
   )
 
+  // ⚠️ 判定指标**必须按动作类型取**，不能一律用 rom_deg。
+  //
+  // 这里的柱子要跟 targets（也就是 targetFor）比，而 targetFor 对靠墙静蹲
+  // 返回的是**保持角度**目标 55°。拿活动范围（天然只有几度）去比，
+  // 图上会读作"完成 17%"—— 而那个患者其实做得完全正确。
+  //
+  // 这是同一个坑的第四处（另三处是 summarize、insight 的 completionOf、
+  // findings）。前三处都有断言钉着，这一处没有，所以它一直活到了
+  // 2026-09-22 —— 数据分析页的结论和这张图放在一起会自相矛盾，
+  // 才发现。check-analysis.ts 现在补上了断言。
   const avgRom = names.map((e) => {
-    const roms = pluck(
+    const field = metricFor(e) === 'hold' ? 'hold_deg' : 'rom_deg'
+    const vs = pluck(
       sessions.filter((s) => s.exercise === e),
-      'rom_deg',
+      field,
     )
-    return Number(mean(roms).toFixed(2))
+    return Number(mean(vs).toFixed(2))
   })
 
   return {

@@ -144,6 +144,49 @@ check('次数统计正确',
   c4.counts[c4.names.indexOf('屈膝滑动')] === 2,
   `屈膝滑动 ${c4.counts[c4.names.indexOf('屈膝滑动')]} 次`)
 
+// ⚠️ 柱子必须和 targets 用**同一个量**。
+//
+// targetFor 对靠墙静蹲返回的是**保持角度**目标 55°，那柱子就必须是保持角度。
+// 第一版这里取的是 rom_deg（天然只有几度），图上读作"完成 17%"——
+// 而那个患者其实做得完全正确。同一页的概要统计用的是正确口径，
+// 于是页面自己和自己矛盾。
+//
+// 这是同一个坑的第四处（另三处：summarize、insight 的 completionOf、
+// findings），前三处都有断言钉着，**这一处没有**，所以一直活到
+// 2026-09-22 加分析页结论时才发现。
+{
+  const withHold = compareExercises([
+    session({
+      started_at: '2026-09-18T02:00:00Z',
+      exercise: '靠墙静蹲',
+      rom_deg: 9, // 真实的活动范围，只有几度
+      hold_deg: 57, // 达标看的这个
+    }),
+  ])
+  const i = withHold.names.indexOf('靠墙静蹲')
+
+  check(
+    '静力动作的柱子取「保持角度」，不是活动范围',
+    withHold.avgRom[i] === 57,
+    `柱高 ${withHold.avgRom[i]}°（若约 9 说明用错了 rom_deg），目标 ${withHold.targets[i]}°`,
+  )
+  check(
+    '于是图上读作达标，而不是"完成 17%"',
+    withHold.avgRom[i]! >= withHold.targets[i]!,
+    `${withHold.avgRom[i]}° / 目标 ${withHold.targets[i]}°`,
+  )
+
+  // 反方向：动态动作不能被改坏 —— 仍然取活动范围
+  const dyn = compareExercises([
+    session({ started_at: '2026-09-18T02:00:00Z', exercise: '屈膝滑动', rom_deg: 93, hold_deg: null }),
+  ])
+  check(
+    '动态动作仍然取活动范围',
+    dyn.avgRom[0] === 93,
+    `${dyn.avgRom[0]}° / 目标 ${dyn.targets[0]}°`,
+  )
+}
+
 // ---------------------------------------------------------------- 温度
 console.log()
 console.log('='.repeat(70))
@@ -212,13 +255,46 @@ check('覆盖天数按本地日期算', s7.activeDays === 3, `${s7.activeDays} �
 check('达标次数按各动作自己的目标判定', s7.onTargetCount === 4,
   `${s7.onTargetCount}/4（若用统一目标 90° 判定，直腿抬高两条会被误判为未达标）`)
 
-// 静力动作不该用活动度参与达标统计
-const staticOnly = summarize([
-  session({ started_at: '2026-09-18T02:00:00Z', exercise: '靠墙静蹲', rom_deg: 8 }),
-])
-check('静力动作不计入活动度达标统计（活动度对它无意义）',
-  staticOnly.onTargetCount === 0,
-  `靠墙静蹲活动度 8°，目标 55° —— 若计入会被误判为未达标`)
+// 静力动作的达标看保持角度，不看活动范围。
+//
+// ⚠️ 这条断言的措辞原先写的是"不计入达标统计"，那是**加 hold_deg 之前**
+//    的行为 —— 当时表里没有那一列，只能整个跳过这类动作。迁移 9 之后它
+//    是**参与**的，只是用另一个量。措辞不改的话，下一个人会以为静力动作
+//    被排除了，而这正是这一页反复出错的地方。
+{
+  // 没有 hold_deg 的老记录：跳过，不拿 rom_deg 去硬凑
+  const legacy = summarize([
+    session({ started_at: '2026-09-18T02:00:00Z', exercise: '靠墙静蹲', rom_deg: 8 }),
+  ])
+  check('没有 hold_deg 的老记录被跳过，不拿活动度硬凑',
+    legacy.onTargetCount === 0,
+    `活动度 8°、目标 55° —— 若拿它判会被误判为未达标`)
+
+  // 有 hold_deg：正常参与，且比的是保持角度
+  const withHold = summarize([
+    session({
+      started_at: '2026-09-18T02:00:00Z',
+      exercise: '靠墙静蹲',
+      rom_deg: 9,
+      hold_deg: 57,
+    }),
+  ])
+  check('有 hold_deg 时静力动作正常参与达标统计',
+    withHold.onTargetCount === 1,
+    `保持角度 57° ≥ 目标 55° → 达标；活动范围仅 9°`)
+
+  const withHoldShort = summarize([
+    session({
+      started_at: '2026-09-18T02:00:00Z',
+      exercise: '靠墙静蹲',
+      rom_deg: 9,
+      hold_deg: 40,
+    }),
+  ])
+  check('保持角度不够时判为未达标',
+    withHoldShort.onTargetCount === 0,
+    `保持角度 40° < 目标 55°`)
+}
 
 check('平均置信度计算正确',
   Math.abs(s7.avgConfidence - 0.94) < 1e-9, String(s7.avgConfidence))
