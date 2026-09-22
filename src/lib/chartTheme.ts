@@ -153,14 +153,27 @@ export function axisPointerStyle() {
  * 统一的绘图区边距。
  *
  * 四张图用同一组数字，横向并排时上下边线才能对齐。
- * `top` 留给标线标签（"预警 50 °C"那种），不预留的话标签会被裁掉。
+ *
+ * ⚠️ `top` 要同时容纳**两样**东西，取能盖住两者的那个值：
+ *
+ *   1. **标线标签**（"预警 50 °C"那种）—— 不预留就被裁掉
+ *   2. **坐标轴名称**（`ΔR/R₀ (%)` 那种）—— ECharts 把它画在轴的顶端
+ *      **上方**，而且 `containLabel` **不管轴名**（它只管刻度数字），
+ *      不留就同样被裁
+ *
+ * 原先只考虑了第 1 条：有标线给 26，否则给 12。于是"应变-温度解耦"
+ * 那张图的轴名被裁掉一半 —— 它是四张图里**唯一有轴名**的，而它没有标线，
+ * 拿到的正是 12px。实测：把 top 调到 30，两个轴名（左 `ΔR/R₀ (%)`、
+ * 右 `温度分量 (%)`）就都出来了。
+ *
+ * 既然横向并排的四张图必须共用同一个 top，就只能取能满足所有图的那一个值。
  */
-export function gridStyle(opts: { hasMarkLine?: boolean; axes?: number } = {}) {
-  const { hasMarkLine = false, axes = 1 } = opts
+export function gridStyle(opts: { axes?: number } = {}) {
+  const { axes = 1 } = opts
   return {
     left: 8,
     right: axes > 1 ? 8 : 12,
-    top: hasMarkLine ? 26 : 12,
+    top: 30,
     bottom: 4,
     containLabel: true,
   }

@@ -169,10 +169,7 @@ function buildOption() {
 
   return {
     animation: false, // 实时流式刷新下动画只会造成拖影
-    grid: gridStyle({
-      hasMarkLine: props.markLines.length > 0,
-      axes: axes.length,
-    }),
+    grid: gridStyle({ axes: axes.length }),
     tooltip: {
       trigger: 'axis',
       // 实时刷新时 tooltip 会疯狂重绘，关闭动画并限制显示条数
