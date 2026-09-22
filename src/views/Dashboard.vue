@@ -25,10 +25,9 @@ import { RouterLink } from 'vue-router'
 
 import RiskBadge from '@/components/RiskBadge.vue'
 import StateBlock from '@/components/StateBlock.vue'
-import { PERFORMANCE_METRICS } from '@/constants/project'
 import { buildDemoAlerts, buildDemoSessions } from '@/lib/demoData'
 import { useCountUp } from '@/composables/useCountUp'
-import { buildInsight, type Insight } from '@/lib/insight'
+import { buildInsight, type Insight, type SummaryCard } from '@/lib/insight'
 import { SCORE_DISCLAIMER } from '@/lib/scoreConfig'
 import { useAlertStore } from '@/stores/alert'
 import { useCareStore } from '@/stores/care'
@@ -45,6 +44,29 @@ const care = useCareStore()
 const loading = ref(true)
 /** 「查看详细数据」是否展开。默认折叠 —— 家属要的结论在上面已经有了 */
 const detailOpen = ref(false)
+
+/**
+ * 三张卡片各自的出口。
+ *
+ * 【为什么卡片需要链接】
+ * 原先三张卡是纯展示 —— 家属看完了"恢复良好 80 分""皮肤温度偏高"
+ * 之后**没有下一步可走**。整页唯一的出口藏在折叠区最底部的两行小字里，
+ * 而那个折叠区默认是收起来的。
+ *
+ * 每张卡指向它自己那条线的详情：今天做了什么 → 去做评估；
+ * 有没有危险 → 去看预警；该做什么 → 去看趋势。
+ */
+const CARD_LINK: Record<SummaryCard['key'], { to: string; text: string }> = {
+  today: { to: '/assessment', text: '去做一次评估' },
+  risk: { to: '/alerts', text: '查看预警记录' },
+  advice: { to: '/analysis', text: '查看数据分析' },
+}
+
+/** 把调整量写成给人看的样子。负号用真正的减号 U+2212，不是连字符 */
+function signed(n: number): string {
+  if (n === 0) return ''
+  return n > 0 ? `+${n}` : `−${Math.abs(n)}`
+}
 
 const greeting = computed(() => {
   const h = new Date().getHours()
@@ -169,13 +191,23 @@ onMounted(reload)
     </aside>
 
     <!-- ================= 健康评分 ================= -->
-    <section class="score" :class="`score--${insight.scoreBand}`">
+    <section
+      class="score"
+      :class="loading ? 'score--loading' : `score--${insight.scoreBand}`"
+      :aria-busy="loading"
+    >
       <p class="score__label">本周恢复评分</p>
 
-      <!-- 没数据时不显示 0 分 —— "0 分"和"还没有数据"是两件事，
-           前者会让刚装上设备的家属以为出了大问题 -->
+      <!-- 加载中 / 有分数 / 没数据，三种状态分开。
+           ⚠️ 加载态**不能**掉进"没数据"那一支 —— 实测过它的后果：
+           一个已有几百条记录的用户，每次打开首页都会先看到
+           「还没有训练数据」加两个「绑定传感器」的按钮，
+           等网络回来才换成真实分数。慢网下这一闪很明显。 -->
+      <p v-if="loading" class="score__value score__value--empty">
+        <span class="sk sk--num" />
+      </p>
       <p
-        v-if="insight.score !== null"
+        v-else-if="insight.score !== null"
         class="score__value"
         :class="`score__value--${insight.scoreBand}`"
       >
@@ -187,24 +219,41 @@ onMounted(reload)
       <!-- 档位。分数本身只是一个数，档位负责**解释它意味着什么** ——
            一个"完美但处在平台期"的患者拿到 85 分，单看数字家属会问
            "为什么不是 100"，配上「恢复良好 · 保持得很好」就不用解释了。
-           灯和分数同源（安全事件已经算进分数里），不会互相矛盾 -->
-      <p v-if="insight.score !== null" class="score__level">
-        <RiskBadge :band="insight.scoreBand" dot size="md" />
+
+           ⚠️ 这里**不放风险角标**。原先放了一个，用的是风险词汇表
+           （🟢正常 / 🟡需要注意 / 🔴需要处理，只有三档），而档位名用的是
+           五档的评分词汇表，两套词挤在同一行会撞车 ——
+           实测各分数段渲染出来是这样：
+
+             95 分 → 「正常　恢复优秀」
+             55 分 → 「需要处理　需要关注」
+             30 分 → 「需要处理　需要处理」   ← 同一个词连着出现两遍
+
+           而且"正常"是**风险**词汇，它在下面那张「有没有需要注意的」卡里
+           表示"没有异常"，搬到评分行里意思就串了。
+           分数的等级感由数字颜色 + 档位名承担已经够了，风险由那张卡负责。 -->
+      <p v-if="!loading && insight.score !== null" class="score__level">
         <strong class="score__level-name">{{ insight.level.label }}</strong>
         <span class="score__level-detail">{{ insight.level.detail }}</span>
       </p>
+      <p v-else-if="loading" class="score__level"><span class="sk sk--line" /></p>
 
-      <p class="score__headline">{{ insight.headline }}</p>
+      <p v-if="loading" class="score__headline"><span class="sk sk--line" /></p>
+      <p v-else class="score__headline">{{ insight.headline }}</p>
 
       <!-- 分数被调整过就必须说明。悄悄改分是这个界面最不能做的事 ——
-           家属会觉得"我没做错什么，分数怎么掉了" -->
-      <div v-if="insight.adjustments.length" class="score__adj">
+           家属会觉得"我没做错什么，分数怎么掉了"。
+           ⚠️ 光说"已下调"不够：实测 demo 的 raw 94 → score 80，
+           中间跨了一个档位（≥90 是"恢复优秀"、≥80 是"恢复良好"），
+           展开详情看到 94 的人会问"那我到底是多少分"。所以带上金额。 -->
+      <div v-if="!loading && insight.adjustments.length" class="score__adj">
         <p
-          v-for="(text, i) in insight.adjustments"
+          v-for="(adj, i) in insight.adjustments"
           :key="i"
           class="score__adj-item"
         >
-          <span aria-hidden="true">⚠</span> {{ text }}
+          <span aria-hidden="true">⚠</span> {{ adj.text }}
+          <strong class="score__adj-delta">{{ signed(adj.delta) }}</strong>
         </p>
         <p v-if="insight.rawScore !== insight.score" class="score__adj-raw">
           调整前为 {{ insight.rawScore }} 分
@@ -212,14 +261,14 @@ onMounted(reload)
       </div>
 
       <!-- 无数据时给一条明确的出路，而不是让家属对着空白页发呆 -->
-      <div v-if="!insight.stats.hasAnyData" class="score__cta">
+      <div v-if="!loading && !insight.stats.hasAnyData" class="score__cta">
         <RouterLink to="/devices" class="btn btn--primary">绑定传感器</RouterLink>
         <RouterLink to="/monitor" class="btn">先看看实时信号</RouterLink>
       </div>
     </section>
 
     <!-- ================= 三张家属语言卡片 ================= -->
-    <section class="cards" aria-label="康复摘要">
+    <section v-if="!loading" class="cards" aria-label="康复摘要">
       <article
         v-for="card in insight.cards"
         :key="card.key"
@@ -233,6 +282,12 @@ onMounted(reload)
         </div>
         <p class="fcard__headline">{{ card.headline }}</p>
         <p v-if="card.detail" class="fcard__detail">{{ card.detail }}</p>
+        <!-- 每张卡指向它自己那条线的详情。没有这一步，家属看完整页
+             也不知道下一步该点哪里 -->
+        <RouterLink :to="CARD_LINK[card.key].to" class="fcard__link">
+          {{ CARD_LINK[card.key].text }}
+          <span aria-hidden="true">→</span>
+        </RouterLink>
       </article>
     </section>
 
@@ -280,34 +335,31 @@ onMounted(reload)
 
         <p class="detail__footnote">
           「动作达标」按各动作自己的康复目标判定，静力动作（靠墙静蹲）看的是
-          保持角度、不参与该项；「进步情况」与之前两周比较；历史记录少于 3 次时
-          该项按"持平"计分，避免用两三次数据算出夸张的进步率。
+          「保持角度」而不是活动范围 —— 静蹲的活动范围天然只有几度；
+          「进步情况」与之前两周比较，且用的是「未封顶」的完成度，
+          所以达标之后继续进步也看得出来；历史记录少于 3 次时该项按"持平"
+          计分，避免用两三次数据算出夸张的进步率。
         </p>
 
-        <!-- ---------- 传感器技术指标 ----------
-             历史记录：这里曾经有一句"打开专业模式还会显示波形、肌电 RMS 与
+        <!-- ---------- 传感器技术指标：已移走 ----------
+             这里原先有一整块「传感器技术指标」，铺开 PERFORMANCE_METRICS
+             的全部参数。删掉它的理由很直接：**「关于」页已经有一份
+             一模一样的**（那一节叫「传感器核心性能」，用的是同一个常量）。
+
+             而且它本来就不属于这一页 —— 概览页讲的是"这一周这个人怎么样"，
+             传感器灵敏度是设备本体的参数，对家属是噪音。
+             折叠区里塞两种性质完全不同的内容，本身就是个错误。
+
+             历史记录：这一块曾经有一句"打开专业模式还会显示波形、肌电 RMS 与
              传感器灵敏度曲线"的提示，而那三样当时一个都没实现 —— 等于在界面上
              写了句假话。专业模式后来整体撤掉了，这条留作记录：
              **写字面承诺之前先确认实现了没有。** -->
-        <h3 class="detail__title">传感器技术指标</h3>
-
-        <p class="detail__note">
-          以下为传感器本体的性能参数，面向工程师与设备评估，不是本周的训练数据。
-        </p>
-        <dl class="tech">
-            <div v-for="m in PERFORMANCE_METRICS" :key="m.label" class="tech__item">
-              <dt class="tech__label">{{ m.label }}</dt>
-              <dd class="tech__value">
-                {{ m.value }}<span v-if="m.unit" class="tech__unit">{{ m.unit }}</span>
-              </dd>
-              <p v-if="m.note" class="tech__note">{{ m.note }}</p>
-            </div>
-        </dl>
-
         <p class="detail__footnote">
-          实时波形与原始信号在
+          传感器的性能参数（灵敏度、检测范围、响应时间等）在
+          <RouterLink to="/about" class="detail__link">关于</RouterLink>
+          页；实时波形与原始信号在
           <RouterLink to="/monitor" class="detail__link">实时监测</RouterLink>
-          页，本周的训练数据在
+          页；本周的训练数据在
           <RouterLink to="/analysis" class="detail__link">数据分析</RouterLink>
           页。
         </p>
@@ -625,6 +677,21 @@ onMounted(reload)
   color: var(--ink-400);
 }
 
+/* 卡片的出口。贴在底部，三张卡高度不齐时也对得上 */
+.fcard__link {
+  margin-top: auto;
+  padding-top: var(--sp-2);
+  align-self: flex-start;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--brand-700);
+  text-decoration: none;
+}
+
+.fcard__link:hover {
+  text-decoration: underline;
+}
+
 /* 红黄两档给整张卡一道左色条。绿档不给 —— 一切都好时不需要被强调 */
 .fcard--yellow {
   border-left: 4px solid var(--warn);
@@ -778,46 +845,49 @@ onMounted(reload)
   color: var(--ink-400);
 }
 
-/* ---------- 技术指标 ---------- */
-.tech {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: var(--sp-4);
-  margin: 0;
-}
-
-.tech__item {
-  padding: var(--sp-3);
-  border: 1px solid var(--line-soft);
+/* ---------- 骨架屏 ----------
+   加载期间占住位置，避免内容到位时整页跳动。
+   只做轻微的呼吸，不做流光扫过 —— 那类动画在医疗界面上显得轻浮，
+   而且这一屏大概率几百毫秒就过去了，动静越小越好。 */
+.sk {
+  display: block;
   border-radius: var(--r-sm);
-  background: var(--surface-sunken);
+  background: var(--line-soft);
+  animation: sk-pulse 1.4s ease-in-out infinite;
 }
 
-.tech__label {
-  font-size: var(--fs-xs);
-  color: var(--ink-500);
+.sk--num {
+  width: 120px;
+  height: 56px;
+  margin: 0 auto;
 }
 
-.tech__value {
-  margin: 3px 0 0;
+.sk--line {
+  width: 100%;
+  max-width: 22em;
+  height: 16px;
+  margin: 0 auto;
+}
+
+@keyframes sk-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* 动效敏感的人不需要这段呼吸 —— 静态灰块一样能表达"正在加载" */
+@media (prefers-reduced-motion: reduce) {
+  .sk {
+    animation: none;
+  }
+}
+
+/* ---------- 调整金额 ---------- */
+.score__adj-delta {
+  margin-left: 4px;
   font-family: var(--font-num);
-  font-size: var(--fs-lg);
   font-weight: var(--fw-semibold);
-  color: var(--ink-800);
-}
-
-.tech__unit {
-  margin-left: 3px;
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-normal);
-  color: var(--ink-400);
-}
-
-.tech__note {
-  margin: 4px 0 0;
-  font-size: var(--fs-micro);
-  line-height: var(--lh-base);
-  color: var(--ink-400);
+  color: var(--ink-700);
 }
 
 /* ==========================================================================
