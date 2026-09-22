@@ -539,6 +539,86 @@ console.log('\n--- 排序与好消息 ---')
 }
 
 // ============================================================================
+// ============================================================================
+console.log('\n--- 达标余量：同一句"达标"下该做的事不一样 ---')
+// ============================================================================
+// 80.4°/目标 80°（刚够到）和 95.3°/目标 90°（富余 5.9°）都叫"达标"，
+// 但前者要巩固、别加量，后者可以进阶。
+//
+// 加这一层之前，演示数据下整个分析页只产出一条"都在改善、保持当前方案"，
+// 对具体动作没有任何建议 —— 而数据里明明有这四个余量值。
+{
+  // 刚好压线：80.1° / 目标 80° → 余量 0.1%
+  const tight = report(run1('坐位伸膝', [70, 75, 79, 80.1]))
+  check(
+    '刚够到目标 → 给出"余量很小"',
+    keysOf(tight).includes('trend_margin_tight'),
+    keysOf(tight).join(','),
+  )
+  check(
+    '而且算黄灯（不是绿灯）—— 它是个需要注意的状态',
+    tight.findings.find((f) => f.key === 'trend_margin_tight')!.band === 'yellow',
+  )
+  check(
+    '建议是"先巩固、别加量"',
+    tight.findings
+      .find((f) => f.key === 'trend_margin_tight')!
+      .action.includes('巩固'),
+    tight.findings.find((f) => f.key === 'trend_margin_tight')!.action,
+  )
+
+  // ⚠️ 余量不足 1% 时不能被四舍五入成「0%」——
+  //    实测踩过："只高出 0.1°（0%）"读起来像"一点余量都没有"，比原文更吓人
+  check(
+    '余量不足 1% 时保留一位小数（不能显示成 0%）',
+    /（0\.\d%）/.test(
+      tight.findings.find((f) => f.key === 'trend_margin_tight')!.evidence,
+    ),
+    tight.findings.find((f) => f.key === 'trend_margin_tight')!.evidence,
+  )
+
+  // 富余很大：直腿抬高目标 10°，做到 14° 就是 +40%
+  const roomy = report(run1('直腿抬高', [10, 12, 13, 14]))
+  check(
+    '明显超出目标 → 给出"可以考虑进阶"',
+    keysOf(roomy).includes('trend_margin_roomy'),
+    keysOf(roomy).join(','),
+  )
+  check(
+    '它是绿灯 —— 这是好消息，不是问题',
+    roomy.findings.find((f) => f.key === 'trend_margin_roomy')!.band === 'green',
+  )
+  check(
+    '建议是"增加阻力或次数"',
+    roomy.findings
+      .find((f) => f.key === 'trend_margin_roomy')!
+      .action.includes('阻力'),
+    roomy.findings.find((f) => f.key === 'trend_margin_roomy')!.action,
+  )
+
+  // 余量处在中间那段（5%~10%）→ **两条都不给**。
+  // 中间那段本来就是正常的，给建议反而是噪音。
+  // 坐位伸膝目标 80°，做到 85 就是 +6.3%
+  const middle = report(run1('坐位伸膝', [78, 82, 84, 85]))
+  check(
+    '余量正常（5%~10%）→ 两条都不给，避免噪音',
+    !keysOf(middle).includes('trend_margin_tight') &&
+      !keysOf(middle).includes('trend_margin_roomy'),
+    keysOf(middle).join(','),
+  )
+
+  // 未达标的动作**不能**进这两条 —— 它归 trend_stuck 管。
+  // 混进来的话同一次评估里会同时出现"没达标"和"刚好达标"两个相反的判断
+  const short = report(run1('坐位伸膝', [50, 50, 50, 50]))
+  check(
+    '未达标的动作不会进余量结论（归"卡住"那条管）',
+    !keysOf(short).includes('trend_margin_tight') &&
+      !keysOf(short).includes('trend_margin_roomy'),
+    keysOf(short).join(','),
+  )
+}
+
+// ============================================================================
 console.log('\n--- 窗口的说法与短窗口提示 ---')
 // ============================================================================
 {

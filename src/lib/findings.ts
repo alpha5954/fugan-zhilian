@@ -90,6 +90,8 @@ export type FindingKey =
   | 'trend_temp_over'
   | 'trend_stuck'
   | 'trend_insufficient'
+  | 'trend_margin_tight'
+  | 'trend_margin_roomy'
   | 'trend_down'
   | 'trend_low_adherence'
   | 'trend_low_confidence'

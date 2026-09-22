@@ -95,13 +95,26 @@ export interface TrendResult {
 }
 
 /**
- * 按动作分别画出活动度趋势。
+ * 按动作分别画出**进展**趋势。
  *
  * 刻意**不把不同动作平均成一条线** —— 直腿抬高的活动度只有 10° 上下，
  * 屈膝滑动接近 100°，平均出来的数字既不代表任何一个动作，也看不出
  * 任何趋势。每个动作单独一条线才能反映各自是否在进步。
  *
- * 某天没做某个动作时该点为 null，折线断开。
+ * ⚠️ **每条线画的是该动作自己"判定达标用的那个量"**，走 `metricFor`：
+ *    动态动作画活动范围，静力动作（靠墙静蹲）画**保持角度**。
+ *
+ *    原先一律画 rom_deg，于是靠墙静蹲那条线一直贴在 10° 附近 ——
+ *    而它达标看的是保持角度（55° 上下）。后果是**页面自己打自己**：
+ *    结论区写「靠墙静蹲 61.7°/目标 55°，已明显超出目标」，
+ *    旁边的图上那条紫线却在 12° 躺着。
+ *
+ *    这是同一个坑的**第五处**（前四处：summarize、insight 的 completionOf、
+ *    findings、compareExercises），每一处都记过一笔。
+ *
+ *    标题也不再叫「关节活动度趋势」—— 有一条线画的不是活动度。
+ *
+ * 某天没做某个动作时该点为 null，由调用方决定要不要跨断点连线。
  */
 export function buildTrendByExercise(sessions: RehabSession[]): TrendResult {
   const byDate = groupByLocalDate(sessions)
@@ -112,17 +125,21 @@ export function buildTrendByExercise(sessions: RehabSession[]): TrendResult {
     sessions.some((s) => s.exercise === e),
   )
 
-  const series: TrendSeries[] = present.map((exercise, i) => ({
-    name: exercise,
-    colorIndex: i,
-    data: dates.map((date) => {
-      const daySessions = (byDate.get(date) ?? []).filter(
-        (s) => s.exercise === exercise,
-      )
-      const roms = pluck(daySessions, 'rom_deg')
-      return roms.length ? Number(mean(roms).toFixed(2)) : null
-    }),
-  }))
+  const series: TrendSeries[] = present.map((exercise, i) => {
+    // 静力动作画保持角度，动态动作画活动范围 —— 见函数头的说明
+    const field = metricFor(exercise) === 'hold' ? 'hold_deg' : 'rom_deg'
+    return {
+      name: exercise,
+      colorIndex: i,
+      data: dates.map((date) => {
+        const daySessions = (byDate.get(date) ?? []).filter(
+          (s) => s.exercise === exercise,
+        )
+        const vs = pluck(daySessions, field)
+        return vs.length ? Number(mean(vs).toFixed(2)) : null
+      }),
+    }
+  })
 
   return { dates, series }
 }

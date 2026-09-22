@@ -199,6 +199,10 @@ const trendSeries = computed<ChartSeries[]>(() =>
     color: seriesColor(s.colorIndex),
     smooth: true,
     width: 1.8,
+    // ⚠️ 必须跨断点连线。患者每天练一个动作、四个动作轮着来，每个动作的
+    //    点之间都隔着 null —— 不连的话一条线都画不出来，只剩一堆孤立的点，
+    //    而这一页叫「趋势」。哪几天有记录仍然看得出来：点还画着（showSymbol）
+    connectNulls: true,
   })),
 )
 
@@ -455,7 +459,7 @@ onMounted(load)
       <section class="charts">
         <article class="panel panel--wide">
           <header class="panel__head">
-            <h3 class="panel__title">关节活动度趋势</h3>
+            <h3 class="panel__title">各动作进展趋势</h3>
             <div class="panel__legend">
               <span v-for="s in trend.series" :key="s.name" class="legend__item">
                 <span class="legend__dot" :style="{ background: seriesColor(s.colorIndex) }" />
@@ -473,7 +477,11 @@ onMounted(load)
           <p class="panel__note">
             各动作分别成线，不跨动作平均 —— 直腿抬高的活动度只有 10° 上下，
             屈膝滑动接近 100°，平均出来的数既不代表任何动作也看不出趋势。
-            断点表示当天没有该动作的记录。
+            每条线画的是该动作"判定达标用的那个量"：动态动作是活动范围，
+            靠墙静蹲是保持角度（它的活动范围天然只有十来度，拿它画看不出任何
+            进展）。圆点是当天的实测值，折线跨过没有记录的日子把它们连起来 ——
+            患者一天只练一个动作、四个动作轮着来，不连的话一条线都画不出来。
+            哪几天没练，看圆点的疏密就知道。
           </p>
         </article>
 

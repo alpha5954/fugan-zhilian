@@ -43,6 +43,20 @@ export interface ChartSeries {
    * 所以默认取"点开着"，密集波形（实时监测）自己显式关掉。
    */
   showSymbol?: boolean
+  /**
+   * 折线是否跨过没有数据的点连起来。默认 false。
+   *
+   * 【两个场景要的不一样，所以做成可配】
+   *   false（默认）—— 缺数据的日子留空，一眼能看出"那天没练"
+   *   true        —— 把趋势画出来；数据点仍然画着（showSymbol），
+   *                  所以"哪几天有记录"照样看得到
+   *
+   * 分析页的「关节活动度趋势」必须开 true：患者每天练一个动作、四个动作
+   * 轮着来，每个动作的点之间都隔着 null —— 关着的话**一条线都画不出来**，
+   * 只剩一堆孤立的点（showSymbol 救回来的）。趋势图没有趋势线，
+   * 那就不叫趋势图了。
+   */
+  connectNulls?: boolean
 }
 
 export interface ChartAxis {
@@ -210,8 +224,7 @@ function buildOption() {
         showSymbol: s.showSymbol ?? true,
         symbolSize: 5,
         smooth: s.smooth ?? false,
-        // 不连接断点：中间缺数据的日子要留空，直接连起来会掩盖"那天没练"
-        connectNulls: false,
+        connectNulls: s.connectNulls ?? false,
         // 点多了必须开抽稀，否则每帧要画的点数翻几倍
         sampling: s.sampling === false ? undefined : ('lttb' as const),
         lineStyle: { width: s.width ?? 1.4, color: s.color },

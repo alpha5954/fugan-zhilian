@@ -42,6 +42,8 @@ import { TEMP_ALERT_THRESHOLD } from './simulator.ts'
 import {
   ADHERENCE_MIN_RATIO,
   CONFIDENCE_MIN,
+  MARGIN_COMFORTABLE,
+  MARGIN_TIGHT,
   SHORTFALL_CRITICAL,
   SHORT_WINDOW_DAYS,
   TREND_MIN_ABS,
@@ -472,6 +474,69 @@ function buildFindings(
       evidence: `平均置信度 ${(avgConf * 100).toFixed(1)}%（低于 ${(CONFIDENCE_MIN * 100).toFixed(0)}%）`,
       action: '确保电极片贴合、动作完整；必要时重新采集',
       priority: 70,
+    })
+  }
+
+  // -------------------------------------------------------------------------
+  // 5b. 达标余量 —— 同一句"达标"下该做的事完全不同
+  // -------------------------------------------------------------------------
+  // 80.4°/目标 80°（刚够到）和 95.3°/目标 90°（富余 5.9°）都叫达标，
+  // 但前者要巩固、别加量，后者可以进阶。不加这两条的话，一个恢复很好的
+  // 患者在这一页只会看到一句"都在改善、保持当前方案" —— 等于什么都没说。
+  const margin = (it: TrendItem) =>
+    it.target > 0 ? (it.latest - it.target) / it.target : 0
+
+  /**
+   * 余量的百分比写法。
+   *
+   * ⚠️ 不能直接 Math.round —— 0.45% 会显示成「0%」，而这句话是
+   * "只高出 0.4°（0%）"，读起来像"一点余量都没有"，比原文更吓人。
+   * 不足 1% 时保留一位小数。
+   */
+  const marginPct = (m: number) =>
+    m * 100 < 1 ? `${(m * 100).toFixed(1)}%` : `${Math.round(m * 100)}%`
+
+  const tight = items.filter((it) => it.onTarget && margin(it) < MARGIN_TIGHT)
+  if (tight.length) {
+    out.push({
+      key: 'trend_margin_tight',
+      label:
+        tight.map((it) => `「${it.exercise}」`).join('') +
+        '刚够到目标，余量很小',
+      band: 'yellow',
+      evidence: tight
+        .map(
+          (it) =>
+            `${it.exercise} 最近 ${it.latest.toFixed(1)}°，目标 ${it.target}°，` +
+            `只高出 ${(it.latest - it.target).toFixed(1)}°（${marginPct(margin(it))}）`,
+        )
+        .join('；'),
+      action:
+        '先巩固这个动作，暂时不要加量 —— 余量这么小，状态差一点就会掉回未达标',
+      priority: 35,
+    })
+  }
+
+  const roomy = items.filter(
+    (it) => it.onTarget && margin(it) >= MARGIN_COMFORTABLE,
+  )
+  if (roomy.length) {
+    out.push({
+      key: 'trend_margin_roomy',
+      label:
+        roomy.map((it) => `「${it.exercise}」`).join('') +
+        '已明显超出目标，可以考虑进阶',
+      band: 'green',
+      evidence: roomy
+        .map(
+          (it) =>
+            `${it.exercise} ${it.latest.toFixed(1)}°/目标 ${it.target}°` +
+            `（+${marginPct(margin(it))}）`,
+        )
+        .join('；'),
+      action:
+        '在无痛前提下增加阻力或每组次数；进阶后先观察两周，再决定要不要继续加',
+      priority: 92,
     })
   }
 

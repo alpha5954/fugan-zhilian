@@ -125,6 +125,20 @@ const sameDay = buildTrendByExercise([
 check('同日同动作多条取平均', sameDay.series[0].data[0] === 90,
   `80 与 100 → ${sameDay.series[0].data[0]}`)
 
+// ⚠️ 趋势图也要按动作类型取量 —— 这是同一个坑的**第五处**。
+//
+// 原先一律画 rom_deg，于是靠墙静蹲那条线一直贴在 10° 附近，而它达标看的是
+// 保持角度（55° 上下）。后果是页面自己打自己：结论区写
+// 「靠墙静蹲 61.7°/目标 55°，已明显超出目标」，旁边的图上那条线却在 12° 躺着。
+const staticTrend = buildTrendByExercise([
+  session({ started_at: '2026-09-18T02:00:00Z', exercise: '靠墙静蹲', rom_deg: 9, hold_deg: 57 }),
+])
+check(
+  '趋势图里静力动作画的是保持角度，不是活动范围',
+  staticTrend.series[0].data[0] === 57,
+  `画出来 ${staticTrend.series[0].data[0]}°（若约 9 说明用错了 rom_deg）`,
+)
+
 // ---------------------------------------------------------------- 对比
 console.log()
 console.log('='.repeat(70))
