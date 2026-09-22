@@ -89,27 +89,33 @@ const DECOUPLE_AXES: ChartAxis[] = [
   { name: '温度分量 (%)', position: 'right' },
 ]
 
+// ⚠️ 这四张全部显式关掉数据点标记。
+//
+// SignalChart 的默认值是**显示**点（见 ChartSeries.showSymbol 的注释）——
+// 那个默认是为了稀疏数据不变成空图。但实时波形每秒好几个采样点、
+// 连续无断点，把标记点画出来会糊成一片，看不出波形形状。
 const emgChart = computed<ChartSeries[]>(() => [
-  { name: 'sEMG', data: emgSeries.value, color: token('--brand-700'), width: 1 },
+  { name: 'sEMG', data: emgSeries.value, color: token('--brand-700'), width: 1, showSymbol: false },
 ])
 
 const angleChart = computed<ChartSeries[]>(() => [
-  { name: '关节角度', data: angleSeries.value, color: token('--ok'), area: true, smooth: true },
+  { name: '关节角度', data: angleSeries.value, color: token('--ok'), area: true, smooth: true, showSymbol: false },
 ])
 
 const tempChart = computed<ChartSeries[]>(() => [
-  { name: '局部温度', data: tempSeries.value, color: token('--danger'), width: 1.6, smooth: true },
+  { name: '局部温度', data: tempSeries.value, color: token('--danger'), width: 1.6, smooth: true, showSymbol: false },
 ])
 
 const decoupleChart = computed<ChartSeries[]>(() => [
-  { name: '原始信号', data: rawSeries.value, color: token('--ink-400'), width: 1.1 },
-  { name: '应变分量', data: strainSeries.value, color: token('--brand-700'), width: 1.6 },
+  { name: '原始信号', data: rawSeries.value, color: token('--ink-400'), width: 1.1, showSymbol: false },
+  { name: '应变分量', data: strainSeries.value, color: token('--brand-700'), width: 1.6, showSymbol: false },
   {
     name: '温度分量',
     data: tempPartSeries.value,
     color: token('--warn'),
     width: 1.6,
     yAxisIndex: 1,
+    showSymbol: false,
   },
 ])
 

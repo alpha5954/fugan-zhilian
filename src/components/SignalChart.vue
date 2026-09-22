@@ -20,6 +20,29 @@ export interface ChartSeries {
   width?: number
   /** 是否禁用抽稀（采样点少时无所谓，点多时必须开） */
   sampling?: boolean
+  /**
+   * 是否显示数据点标记。**默认 true**。
+   *
+   * 【为什么默认开着】
+   * 这个默认值是踩过坑之后定的。原先写死 `showSymbol: false`，
+   * 配上 `connectNulls: false`，在**稀疏且不连续**的数据上会画出一张空图：
+   * 线段需要两个相邻非空点才画得出来，标记又被关掉，于是什么都不显示。
+   *
+   * 实测（1440 宽，量 canvas 上的彩色像素）：
+   *
+   *   每个动作隔几天练一次（康复的常态）  →  **0 个彩色像素**
+   *   同一个动作连续几天练                →  2548 个彩色像素
+   *
+   * 而数据分析页的「关节活动度趋势」正是前者 —— 患者每天练一个动作、
+   * 四个动作轮着来，于是**那张图一直是空的**。因为分析页对无数据的访客
+   * 走空态、没有演示数据，这个 bug 一直没被人看见。
+   *
+   * 两种错法的代价不对等：
+   *   点太密   → 难看，但看得出有数据
+   *   点不显示 → **一张空图，而且不报错**
+   * 所以默认取"点开着"，密集波形（实时监测）自己显式关掉。
+   */
+  showSymbol?: boolean
 }
 
 export interface ChartAxis {
@@ -182,7 +205,10 @@ function buildOption() {
         name: s.name,
         data: s.data,
         yAxisIndex: s.yAxisIndex ?? 0,
-        showSymbol: false,
+        // 默认显示点。理由见 ChartSeries.showSymbol 的注释 ——
+        // 关掉之后，稀疏且不连续的数据会画出一张不报错的空图
+        showSymbol: s.showSymbol ?? true,
+        symbolSize: 5,
         smooth: s.smooth ?? false,
         // 不连接断点：中间缺数据的日子要留空，直接连起来会掩盖"那天没练"
         connectNulls: false,
