@@ -6,6 +6,7 @@ import {
   type MonitorScenario,
   type Sample,
 } from '../src/lib/simulator.ts'
+import { makeRng } from '../src/lib/rng.ts'
 
 const results: [string, boolean, string][] = []
 function check(label: string, ok: boolean, detail = '') {
@@ -13,8 +14,23 @@ function check(label: string, ok: boolean, detail = '') {
   console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${label}${detail ? `  ->  ${detail}` : ''}`)
 }
 
-function run(scenario: MonitorScenario, seconds: number, tickMs = 100): Sample[] {
-  const sim = new SignalSimulator(scenario)
+/**
+ * 跑一段模拟器，返回采样序列。
+ *
+ * ⚠️ **用固定种子，不用 Math.random。** 模拟器里有三处概率事件（信号丢失、
+ *    热敷过热、每轮动作参数抖动），用真随机的话断言会随运行漂移 ——
+ *    轻则数值忽大忽小，重则偶发变红（本项目已经因为 flaky 断言吃过亏，
+ *    见 README「自检脚本本身也会出错」）。固定种子之后每次跑的结果完全一样。
+ *
+ *    要看随机分布的话自己写临时脚本，别在这里用 Math.random。
+ */
+function run(
+  scenario: MonitorScenario,
+  seconds: number,
+  tickMs = 100,
+  seed = 20260922,
+): Sample[] {
+  const sim = new SignalSimulator(scenario, {}, makeRng(seed))
   const out: Sample[] = []
   for (let i = 0; i < (seconds * 1000) / tickMs; i++) out.push(sim.next(tickMs))
   return out
@@ -93,39 +109,75 @@ console.log('='.repeat(66))
 console.log('场景二：热敷监测')
 console.log('='.repeat(66))
 
-const hot = run('hotpack', 95)
-const hAngle = range(hot.map((s) => s.angle))
-const hTemp = range(hot.map((s) => s.temp))
-const hEmg = range(hot.map((s) => Math.abs(s.emg)))
+// ⚠️ 这里要跑**两段**，不能只跑一段。
+//
+// 模拟器现在有两件事同时发生：温度向 45°C 渐近（正常热敷），以及偶尔跳到
+// 55°C 的过热事件。第一段过热在进入场景后 25~55 秒必定出现（见
+// FIRST_OVERHEAT_* 的说明），所以：
+//
+//   短窗口（20 秒）—— 热敷的**正常形态**，还没被过热污染
+//   长窗口（6 分钟）—— **过热事件**，用来验预警真的会触发
+//
+// 一开始只跑了一段 95 秒的，结果"先快后慢"那条被中间的过热顶翻了
+// （中段 20 秒反而升了 3.56°C）；而"向 50 渐近"和"跨越阈值"两条虽然
+// 显示 PASS，其实是**因为过热才通过的** —— 断言还在，含义已经没了。
+const hotShort = run('hotpack', 20)
+const hot = run('hotpack', 360)
+
+const hAngle = range(hotShort.map((s) => s.angle))
+const hEmg = range(hotShort.map((s) => Math.abs(s.emg)))
 
 check('肢体静止，角度基本不变', hAngle.max - hAngle.min < 2, fmt(hAngle, 2))
-check(
-  '温度从 40°C 起步、向 50°C 渐近（不是匀速升到）',
-  hTemp.min > 39.5 && hTemp.max > 49.5,
-  fmt(hTemp),
-)
 
-// 指数趋近的特征：**前段快、后段慢**。线性升温没有这个性质，
-// 所以这条断言能区分两种实现 —— 改回线性它会失败
+// 正常热敷：从 40°C 起步、向治疗区间中部（45°C）渐近，
+// 而且**全程不越过预警阈值** —— 这条比"峰值大于多少"重要得多，
+// 它正是这次修正的核心：正常热敷不该被判成异常
 {
+  const hShort = range(hotShort.map((s) => s.temp))
+  check(
+    '正常热敷从 40°C 起步、始终不越过预警阈值',
+    hShort.min > 39.5 && hShort.max < TEMP_ALERT_THRESHOLD,
+    fmt(hShort),
+  )
+
+  // 指数趋近的特征：**等长的连续区间里，涨幅逐个变小**。
+  // 线性升温没有这个性质（三段涨幅会一样），所以这条能区分两种实现。
+  //
+  // 用"三段递减"而不是原先的"前后两段比 1.5 倍"：窗口只有 20 秒（再长就撞上
+  // 过热了），两段比的比值会掉到 1.43 这种贴边的数；三段递减的判据更稳，
+  // 而且它本来就是指数函数的定义性特征。
+  //
   // ⚠️ 采样是每 100ms 一个点（run 的 tickMs 默认值），所以下标要乘 10。
   //    写成 hot[sec] 的话取到的是第 sec 个**采样点**，也就是第 sec/10 秒 ——
-  //    第一次写就是这么错的，算出来"前 20 秒只升了 0.71°C"。
+  //    早先就是这么写错的，算出来"前 20 秒只升了 0.71°C"。
   const at = (sec: number) =>
-    hot[Math.min(hot.length - 1, Math.round(sec * 10))].temp
-  const firstHalf = at(20) - at(0) // 前 20 秒
-  const secondHalf = at(60) - at(40) // 中间 20 秒
+    hotShort[Math.min(hotShort.length - 1, Math.round(sec * 10))].temp
+  const seg = [at(7) - at(0), at(14) - at(7), at(21) - at(14)]
   check(
     '升温先快后慢（指数趋近，不是线性）',
-    firstHalf > secondHalf * 1.5,
-    `前 20 秒升 ${firstHalf.toFixed(2)}°C，中段 20 秒升 ${secondHalf.toFixed(2)}°C`,
+    seg[0]! > seg[1]! && seg[1]! > seg[2]!,
+    `连续 7 秒的涨幅 ${seg.map((x) => x.toFixed(3)).join(' → ')}°C`,
   )
 }
 check('肌电维持基线水平（无主动收缩）', hEmg.max < 0.1, `峰值 ${hEmg.max.toFixed(3)} mV`)
 
-const crossed = hot.filter((s) => s.temp >= TEMP_ALERT_THRESHOLD)
-check(`温度跨越 ${TEMP_ALERT_THRESHOLD}°C 预警阈值`, crossed.length > 0,
-  `越过阈值后有 ${crossed.length} 个采样点`)
+// 过热事件：袋温跳到 55°C，越过阈值并触发预警
+{
+  const crossed = hot.filter((s) => s.temp >= TEMP_ALERT_THRESHOLD)
+  const firstAt = hot.findIndex((s) => s.temp >= TEMP_ALERT_THRESHOLD)
+  check(
+    `过热事件会跨越 ${TEMP_ALERT_THRESHOLD}°C 预警阈值`,
+    crossed.length > 0,
+    `越过阈值后有 ${crossed.length} 个采样点，首次在第 ${(firstAt / 10).toFixed(0)} 秒`,
+  )
+  check(
+    '而且第一次越界不是一开始就发生（正常热敷阶段是干净的）',
+    firstAt > 20 * 10,
+    `首次越界在第 ${(firstAt / 10).toFixed(0)} 秒`,
+  )
+  const peak = Math.max(...hot.map((s) => s.temp))
+  check('过热档位接近 55°C', peak > 53 && peak < 57, `峰值 ${peak.toFixed(2)}°C`)
+}
 
 // 热敷场景下温度分量应主导原始信号的变化
 const hTempPart = range(hot.map((s) => s.tempPart))

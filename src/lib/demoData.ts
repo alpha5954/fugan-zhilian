@@ -23,6 +23,7 @@
 
 import { generateSession } from './assessment.ts'
 import { DEMO_SEED, makeRng, type Rng } from './rng.ts'
+import { TEMP_ALERT_THRESHOLD } from './simulator.ts'
 import type { ExerciseName } from './assessment.ts'
 import type { Alert, RehabSession, Waveform } from '@/types'
 
@@ -131,9 +132,15 @@ export function buildDemoSessions(now: Date = new Date()): RehabSession[] {
 /**
  * 演示用的预警记录。
  *
- * 只放一条**已处理**的一般预警，不放严重预警 ——
- * 演示的重点是"系统能发现问题并且问题已经被处理了"，
- * 而不是让刚打开页面的人以为出了大事。
+ * 放一条**已处理**的温度预警，内容是"热敷袋加热过久"那类过热事件 ——
+ * 也就是模拟器会真的产生的那种（见 simulator.ts 的 OVERHEAT_*）。
+ * 演示的重点是"系统能发现问题、而且问题已经被处理了"。
+ *
+ * ⚠️ severity 跟着实时监测的口径走：温度越阈就是 **critical**
+ *    （见 useMonitor 里 raiseAlert 的调用）。原先这里写的是 warning、
+ *    数值 45.8、阈值 45 —— 阈值提到 50 之后那三个数全都不成立了。
+ *    想过保持 warning 不动以保住演示分数，但那会造出一个"预警记录页显示
+ *    黄灯、实时监测页对同一件事显示红灯"的矛盾，比分数不好看严重。
  */
 export function buildDemoAlerts(now: Date = new Date()): Alert[] {
   const at = new Date(now.getTime() - 4 * DAY_MS)
@@ -146,12 +153,13 @@ export function buildDemoAlerts(now: Date = new Date()): Alert[] {
       device_id: null,
       session_id: null,
       kind: 'temp_high',
-      severity: 'warning',
+      severity: 'critical',
       message: null,
-      value: 45.8,
-      threshold: 45,
+      // 过热档（模拟器里是 55°C）途中的一次读数
+      value: 52.8,
+      threshold: TEMP_ALERT_THRESHOLD,
       occurred_at: at.toISOString(),
-      // 已处理。未处理的话首页会一直挂着一条黄灯
+      // 已处理。未处理的话首页会一直挂着一条红灯
       acknowledged_at: new Date(at.getTime() + 40 * 60 * 1000).toISOString(),
       acknowledged_by: 'demo',
       created_at: at.toISOString(),

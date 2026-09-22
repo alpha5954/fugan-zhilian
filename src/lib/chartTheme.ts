@@ -153,7 +153,7 @@ export function axisPointerStyle() {
  * 统一的绘图区边距。
  *
  * 四张图用同一组数字，横向并排时上下边线才能对齐。
- * `top` 留给标线标签（"预警 45 °C"那种），不预留的话标签会被裁掉。
+ * `top` 留给标线标签（"预警 50 °C"那种），不预留的话标签会被裁掉。
  */
 export function gridStyle(opts: { hasMarkLine?: boolean; axes?: number } = {}) {
   const { hasMarkLine = false, axes = 1 } = opts

@@ -89,12 +89,73 @@ const DEFAULT_PROFILE: MotionProfile = {
 }
 
 /** 热敷袋温度与起始皮温。
- *  注意升温**没有固定时长** —— 是指数趋近，见 computeTemp */
+ *  注意升温**没有固定时长** —— 是指数趋近，见 computeTemp
+ *
+ *  目标取 45°C：计划书说「热敷温度通常为 40-50℃」，45 落在治疗区间中部。
+ *
+ *  ⚠️ 这个值必须**低于** TEMP_ALERT_THRESHOLD，正常热敷才不会被判成异常。
+ *     原先两者是反的（目标 50、阈值 45），后果实测过：一次 20 分钟的热敷
+ *     会话里，温度在 **19.3 秒**就越过阈值，然后**有 19.7 分钟处于报警状态**
+ *     —— 98.5% 的时间都在报警。一个一直亮着的安全告警不携带任何信息，
+ *     等于没有告警；而计划书把「独居老人热敷预警」当作核心场景。 */
 const HOTPACK_TEMP_START = 40
-const HOTPACK_TEMP_END = 50
+const HOTPACK_TEMP_END = 45
 
-/** 热敷安全阈值（计划书：皮肤接触 50°C 仅需 5 分钟即可造成不可逆损伤） */
-export const TEMP_ALERT_THRESHOLD = 45
+/**
+ * 过热事件：热敷袋加热过久，袋温明显高于治疗区间。
+ *
+ * 【为什么需要它】
+ * 把正常热敷的目标降到 45 之后，正常会话再也不会触发预警 —— 这是对的，
+ * 但预警功能就再也没机会出现了。而计划书把「热敷操作不当」列为主要致伤
+ * 原因、把热敷预警当作核心场景，所以**必须有一种真的会越界的会话**。
+ *
+ * 形态选「加热过久」而不是「忘记取出」：忘记取出是**时间**维度的问题
+ * （计划书：接触 44℃ 持续 6 小时也有害），而温度通道测不出时间；
+ * 加热过久则是实打实的**温度**越界，温度传感器能直接看见。
+ *
+ * 概率按**每个采样点**算（和信号丢失同一个模式）。
+ *
+ * ⚠️ 下面的数是**照着"演示时看得到"调的，不是照着真实发生率调的** ——
+ *    真实里"加热过久"应该是偶尔一次，而模拟器没有"第几次热敷"这个概念，
+ *    只能给一个平均频率。取这个值的结果是：大约每 5 分钟来一次、每次持续
+ *    1~2 分钟，也就是**两成左右的时间处于告警状态**。
+ *
+ *    调这个的时候注意两头：调太低演示时干等看不到，调太高就变成"一直在报警"
+ *    —— 那正是这次要修掉的毛病（原先 98.5% 的时间都在报警）。
+ *    实测对照表见 git 提交信息。
+ */
+const OVERHEAT_TEMP = 55
+const OVERHEAT_PROBABILITY = 0.0003
+const OVERHEAT_MIN_MS = 60_000
+const OVERHEAT_MAX_MS = 120_000
+
+/**
+ * 第一段过热的开始时刻（进入热敷场景后的毫秒数）。
+ *
+ * ⚠️ **这一条是刻意的演示编排，不是物理建模。**
+ * 纯按概率来的话首次过热平均要等 5 分半，实测有个种子等到了 23 分钟 ——
+ * 演示时干等着看不到预警，而"过热预警"恰恰是计划书里的核心场景。
+ * 所以进入热敷场景后，第一段过热保证在 25~55 秒内出现一次。
+ *
+ * 之后的过热仍然按 OVERHEAT_PROBABILITY 随机来 —— 也就是说：
+ * **每个热敷会话一开始都会演示一次预警，之后的节奏才是"偶尔"。**
+ * 答辩被问到"多久过热一次"时，要按 OVERHEAT_PROBABILITY 那个频率回答，
+ * 不要把这一段当成真实发生率。
+ */
+const FIRST_OVERHEAT_MIN_MS = 25_000
+const FIRST_OVERHEAT_MAX_MS = 55_000
+
+/**
+ * 热敷安全阈值。
+ *
+ * 计划书原文（出现两处，措辞一致）：「临床研究表明，皮肤接触 44℃ 热源持续
+ * 6 小时、或接触 50℃ 仅需 5 分钟，即可造成不可逆的低温烫伤。」
+ *
+ * 取 **50** —— 就是计划书点名的那个温度，**不留余量**。因为计划书同时说
+ * 「治疗温度通常为 40-50℃」，治疗区间的上限本来就是 50；再往下压（比如
+ * 45）会把正常热敷判成异常，实测那样每次会话 98.5% 的时间都在报警。
+ */
+export const TEMP_ALERT_THRESHOLD = 50
 
 /** 基线噪声幅度，mV */
 const EMG_BASELINE = 0.04
@@ -164,6 +225,17 @@ export class SignalSimulator {
   /** 当前这次信号丢失还剩多少毫秒；> 0 表示正在丢失 */
   private dropRemaining = 0
 
+  // --- 热敷：当前升温段 ---
+  // 目标温度正常是 HOTPACK_TEMP_END，过热事件时切到 OVERHEAT_TEMP。
+  // 换目标时把 tempFrom / tempPhaseStart 一起重置，曲线才连续（见 setHotpackTarget）
+  private hotpackTarget = HOTPACK_TEMP_END
+  private tempFrom = HOTPACK_TEMP_START
+  private tempPhaseStart = 0
+  /** 这次过热还剩多少毫秒；> 0 表示正在过热 */
+  private overheatRemaining = 0
+  /** 第一段过热排在什么时刻（毫秒）。0 = 已经发生过了 */
+  private firstOverheatAt = 0
+
   // --- 当前这一轮动作的参数。每轮重抽，见 computeMotion ---
   private repStartT = 0
   private repEndT = 0
@@ -188,6 +260,20 @@ export class SignalSimulator {
     this.scenario = scenario
     this.profile = { ...DEFAULT_PROFILE, ...profile }
     this.rng = rng
+    // ⚠️ 构造函数**不会**调 reset()，所以要单独排一次 ——
+    //    第一版漏了这里，结果 new SignalSimulator('hotpack') 建出来的实例
+    //    firstOverheatAt 恒为 0，"开场过热"永远不触发（实测首次告警仍在
+    //    363~1406 秒，等于白加）。
+    this.scheduleFirstOverheat()
+  }
+
+  /** 排下一段"开场过热"。热敷场景才有，见 FIRST_OVERHEAT_* */
+  private scheduleFirstOverheat(): void {
+    this.firstOverheatAt =
+      this.scenario === 'hotpack'
+        ? FIRST_OVERHEAT_MIN_MS +
+          this.rng() * (FIRST_OVERHEAT_MAX_MS - FIRST_OVERHEAT_MIN_MS)
+        : 0
   }
 
   /** 切换场景并重置状态 */
@@ -203,6 +289,11 @@ export class SignalSimulator {
     this.emgPhase = 0
     this.tempBaseline = TEMP_REFERENCE
     this.dropRemaining = 0
+    this.hotpackTarget = HOTPACK_TEMP_END
+    this.tempFrom = HOTPACK_TEMP_START
+    this.tempPhaseStart = 0
+    this.overheatRemaining = 0
+    this.scheduleFirstOverheat()
     // 归零，让下一轮重新抽参数（-1 表示"还没有当前轮"）
     this.repStartT = 0
     this.repEndT = -1
@@ -228,6 +319,52 @@ export class SignalSimulator {
   }
 
   /**
+   * 热敷过热事件的状态推进。每个采样点调一次，只在热敷场景。
+   *
+   * 和信号丢失用同一个模式（`overheatRemaining` 倒计时 + 每点判概率）：
+   * 两者都是"持续一段时间的瞬时故障"，共用一套写法比各造一套好懂。
+   */
+  private advanceOverheat(dt: number): void {
+    // 开场那一段：到点就触发，不看概率
+    if (this.firstOverheatAt > 0 && this.t >= this.firstOverheatAt) {
+      this.firstOverheatAt = 0
+      this.startOverheat()
+      return
+    }
+
+    if (this.overheatRemaining > 0) {
+      this.overheatRemaining -= dt
+      // 过热结束，袋温回落到正常档（曲线从当前温度平滑降下去）
+      if (this.overheatRemaining <= 0) this.setHotpackTarget(HOTPACK_TEMP_END)
+      return
+    }
+    if (this.rng() < OVERHEAT_PROBABILITY) this.startOverheat()
+  }
+
+  /** 开始一段过热，并抽定持续时长 */
+  private startOverheat(): void {
+    this.overheatRemaining =
+      OVERHEAT_MIN_MS + this.rng() * (OVERHEAT_MAX_MS - OVERHEAT_MIN_MS)
+    this.setHotpackTarget(OVERHEAT_TEMP)
+  }
+
+  /**
+   * 切换热敷袋的目标温度。
+   *
+   * ⚠️ 必须**先取当前温度、再换目标**：把 tempFrom 设成"换目标那一刻的温度"，
+   *    并把相位起点挪到当前时刻，曲线才是从当前值继续往新目标走。
+   *    直接改目标的话，指数公式会按整段 `t` 重算，温度瞬间跳到新曲线上 ——
+   *    图上就是一个垂直的突跳。
+   */
+  private setHotpackTarget(target: number): void {
+    const now = this.computeTemp()
+    this.tempFrom = now
+    this.tempPhaseStart = this.t
+    this.hotpackTarget = target
+    this.tempNoise = 0
+  }
+
+  /**
    * 推进 dt 毫秒，产出一个采样点。
    */
   next(dt: number): Sample {
@@ -244,6 +381,11 @@ export class SignalSimulator {
         DROPOUT_MIN_MS + this.rng() * (DROPOUT_MAX_MS - DROPOUT_MIN_MS)
     }
     const lost = this.dropRemaining > 0
+
+    // ---- 热敷过热 ----
+    // 和信号丢失同一个模式：每个采样点判一次概率，触发后持续一段随机时长。
+    // 只在热敷场景有意义 —— 康复训练里没有热源
+    if (this.scenario === 'hotpack') this.advanceOverheat(dt)
 
     const temp = this.computeTemp()
     const { angle, envelope } = this.computeMotion()
@@ -306,11 +448,13 @@ export class SignalSimulator {
     if (this.scenario === 'hotpack') {
       this.tempNoise += (this.rng() - 0.5) * 0.02
       this.tempNoise *= 0.97
-      // 向热敷袋温度（HOTPACK_TEMP_END）渐近逼近
-      const span = HOTPACK_TEMP_END - HOTPACK_TEMP_START
+      // 向**当前目标温度**渐近逼近。正常是 HOTPACK_TEMP_END，过热时是
+      // OVERHEAT_TEMP —— 换目标时 setHotpackTarget 会以当时的温度为新起点，
+      // 所以曲线连续、不会跳变
+      const span = this.hotpackTarget - this.tempFrom
       return (
-        HOTPACK_TEMP_END -
-        span * Math.exp(-this.t / HOTPACK_TAU_MS) +
+        this.hotpackTarget -
+        span * Math.exp(-(this.t - this.tempPhaseStart) / HOTPACK_TAU_MS) +
         this.tempNoise
       )
     }
@@ -382,7 +526,7 @@ export const SCENARIO_INFO: Record<
   hotpack: {
     label: '热敷监测',
     detail:
-      `肢体静止，局部皮温向热敷袋温度指数趋近（约 20 秒越过 ${TEMP_ALERT_THRESHOLD} °C 预警阈值）` +
-      '—— 真实升温是先快后慢，不是匀速',
+      `肢体静止，局部皮温向热敷袋温度指数趋近（真实升温先快后慢，不是匀速）；` +
+      `热敷袋加热过久时会冲到 55 °C 上下，越过 ${TEMP_ALERT_THRESHOLD} °C 触发预警`, 
   },
 }

@@ -128,7 +128,8 @@ const tempMarkLines = computed(() => [
  *
  * 【为什么温度图的 Y 轴不能自适应】
  * 试过让范围贴合数据 —— 康复训练时皮温就在 33 上下，自适应之后曲线
- * 确实占满绘图区，好看得多。**但 45 °C 的预警线直接跑到了屏幕外。**
+ * 确实占满绘图区，好看得多。**但预警线直接跑到了屏幕外**（当时阈值是
+ * 45 °C，现在是 50，结论不变）。
  *
  * 温度是**安全参数**：患者要看的不是"我的体温在 33.02 和 33.10 之间波动"，
  * 而是"我离烫伤还有多远"。为了好看把警戒线弄丢，方向反了。
@@ -137,11 +138,23 @@ const tempMarkLines = computed(() => [
  * 【空白怎么办】
  * 固定范围必然留大片空白。用这道色带把空白变成信息：
  * 曲线在色带**下方** = 安全，一眼就能判断，不需要读数字。
+ *
+ * ⚠️ 上界必须盖住**过热档**（模拟器里是 55°C）。原先卡在 52，而热敷过热会
+ *    冲到 55 —— 超出的那段被直接裁掉，**预警事件在图上反而看不见**，
+ *    只剩下面一个状态标签在闪。固定范围的代价是空白，但裁掉数据不是。
  */
+
+/**
+ * 温度图的纵轴上界。
+ *
+ * 色带和坐标轴都用它 —— 分成两个数写迟早会漂，而漂的后果就是上面那条：
+ * 色带画到 A、轴卡在 B，超出的数据静默消失。
+ */
+const TEMP_AXIS_MAX = 58
 const tempMarkAreas = computed(() => [
   {
     from: tempThreshold,
-    to: 52,
+    to: TEMP_AXIS_MAX,
     // 用品牌色令牌加透明度而不是写死颜色，改了主题这里跟着变。
     // 8% 的浓度足够看出是一块区域，又不会把曲线压下去
     color: `${token('--danger')}14`,
@@ -296,12 +309,12 @@ const decoupleLegend = [
           <span class="panel__unit">°C</span>
         </header>
         <!-- 温度图的 Y 轴**必须固定范围**，不能像其他图那样自适应（见下方
-             tempMarkAreas 的注释）。范围取 30–52：覆盖热敷监测 40→50 的
-             全过程，并把 45 °C 的警戒线留在可见区内。 -->
+             tempMarkAreas 的注释）。范围取 30–58：下限盖住康复训练的皮温
+             （33 上下），上界盖住热敷的过热档（55），预警线留在可见区内。 -->
         <SignalChart
           :series="tempChart"
           :x-data="timeAxis"
-          :y-axes="[{ name: '°C', position: 'left', min: 30, max: 52 }]"
+          :y-axes="[{ name: '°C', position: 'left', min: 30, max: TEMP_AXIS_MAX }]"
           :mark-lines="tempMarkLines"
           :mark-areas="tempMarkAreas"
           :height="200"

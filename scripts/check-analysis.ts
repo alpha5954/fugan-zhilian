@@ -193,10 +193,14 @@ console.log('='.repeat(70))
 console.log('5. 温度：按次而非按天')
 console.log('='.repeat(70))
 
+// ⚠️ 越阈的那一次**从阈值推导**，不要写死。
+//    原先写的是 48.5 —— 阈值从 45 提到 50 之后它就不越界了，
+//    断言跟着红，但红的是"数字没跟着改"而不是逻辑错了。
+const OVER_TEMP = TEMP_ALERT_THRESHOLD + 1
 const temps = buildTemperatureHistory([
   session({ started_at: '2026-09-18T02:00:00Z', temp_c: 33.0 }),
   session({ started_at: '2026-09-18T09:00:00Z', temp_c: 41.0 }),
-  session({ started_at: '2026-09-18T15:00:00Z', temp_c: 48.5 }),
+  session({ started_at: '2026-09-18T15:00:00Z', temp_c: OVER_TEMP }),
 ])
 console.log(`  标签：${temps.labels.join(' | ')}`)
 console.log(`  数值：${temps.values.join(', ')}`)
@@ -208,12 +212,12 @@ check('按时间升序排列',
   new Date(temps.labels[2].replace(' ', 'T')).getTime() || true,
   temps.labels[0] + ' → ' + temps.labels[2])
 check(`越阈值统计正确（阈值 ${TEMP_ALERT_THRESHOLD}°C）`, temps.overCount === 1,
-  `48.5°C 那一次，共 ${temps.overCount} 次`)
+  `${OVER_TEMP}°C 那一次，共 ${temps.overCount} 次`)
 check('temp_c 为 null 时保留 null 而非填 0',
   buildTemperatureHistory([session({ started_at: '2026-09-18T02:00:00Z', temp_c: null })])
     .values[0] === null)
 
-// 若按天平均，48.5 会被 (33+41+48.5)/3 = 40.8 抹平，越阈事件就消失了
+// 若按天平均，那一次越界会被三次的平均值抹平，越阈事件就消失了
 const dayAvg = temps.values.reduce((a, b) => a + (b ?? 0), 0) / 3
 check('按天平均会抹掉越阈事件（说明为何要按次）',
   dayAvg < TEMP_ALERT_THRESHOLD,
