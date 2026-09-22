@@ -186,9 +186,12 @@ async function handleCommand(command: string) {
            用户会看到一片白且点不动。边界把它换成一个能看懂的提示
            和"重新加载"入口 -->
       <!-- 路由切换淡入。
-           ⚠️ 用 mode="out-in" 且时长压得很短（出 80ms / 入 160ms）——
-              不加 out-in 的话新旧两页会同时在文档流里，切换瞬间高度
-              会跳一下。总耗时 240ms 已经足够"顺"，再长就显得拖。 -->
+           用 mode="out-in"，时长压在 240ms（出 80 / 入 160）—— 不加 out-in
+           的话新旧两页会同时在文档流里，切换瞬间高度会跳一下。
+
+           ⚠️ 样式在本文件的 `<style>` 里（搜「路由切换淡入」）。
+              2026-09-22 之前这段注释描述的效果**并不存在** —— Transition
+              在，但一行 CSS 都没写。改这段的时候去看一眼那边还在不在。 -->
       <ErrorBoundary>
         <RouterView v-slot="{ Component }">
           <Transition name="page" mode="out-in">
@@ -210,6 +213,46 @@ async function handleCommand(command: string) {
   flex-direction: column;
   min-height: 100vh;
   background: var(--canvas);
+}
+
+/* ==========================================================================
+   路由切换淡入
+   ==========================================================================
+   ⚠️ 这一段原先**不存在**。`<Transition name="page">` 一直在模板里，但全项目
+   没有任何 `.page-*` 样式 —— 没有 CSS 时 Vue 判定"无过渡"，`mode="out-in"`
+   只让两页依次挂载，视觉上是瞬时切换。而上面那条注释却写着"出 80ms / 入
+   160ms…总耗时 240ms"：**注释描述了没写的代码**（README 又抄了一遍，
+   两份文档互相背书一个不存在的功能）。
+
+   现在按那段注释本来的意图补上：
+
+     * 出 80ms / 入 160ms。"出"必须短 —— 用户已经点了新页面，让他等旧页面
+       慢慢消失是没道理的；"入"稍长一点显得从容。总 240ms。
+     * `mode="out-in"` 已在模板里，两页不会同时在文档流里，高度不跳。
+     * **只动 opacity，不动 transform** —— 位移会让整页内容看起来在"飞"，
+       在数据密集的界面上很晃眼。
+   ========================================================================== */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.16s ease;
+}
+
+.page-leave-active {
+  transition-duration: 0.08s;
+}
+
+.page-enter-from,
+.page-leave-to {
+  opacity: 0;
+}
+
+/* 动效敏感的人不需要这段淡入。系统里关掉动效之后这里不能还在淡 ——
+   useCountUp 里有一模一样的判断，理由见那个文件的注释 */
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active,
+  .page-leave-active {
+    transition: none;
+  }
 }
 
 /* ==========================================================================

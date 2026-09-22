@@ -14,6 +14,7 @@ import { ElMessage } from 'element-plus'
 import BarChart from '@/components/BarChart.vue'
 import { TriangleAlert } from 'lucide-vue-next'
 
+import DemoNotice from '@/components/DemoNotice.vue'
 import FindingCard from '@/components/FindingCard.vue'
 import type { BarSeries } from '@/components/BarChart.vue'
 import PhaseChart from '@/components/PhaseChart.vue'
@@ -337,6 +338,21 @@ watch(() => care.viewingPatientId, loadHistory)
 
     <!-- ================= 右栏：结果 ================= -->
     <div class="assess__main">
+      <!-- 数据来源声明。
+           ⚠️ 这一栏的数字**全部**由模拟器生成（硬件尚未接入），而且右下角
+           「保存到训练记录」会把它们**真的写进数据库**。不说清的话，看的人
+           会以为这些是实测的 —— 而这一页恰恰是这些记录诞生的地方。
+
+           放在右栏最前面而不是某一块上：动作识别结果、指标概览、四张图
+           全都来自同一次模拟会话，只标一块会让人以为其余的例外。
+
+           项目的一条底线是不把模拟数据说成实测数据（见 README「数据来源」）。
+           原先这一页没有任何标注，README 里那句「界面全程标注」是不成立的。 -->
+      <DemoNotice tag="模拟数据">
+        本页的动作识别与各项指标由内置模拟器生成（传感器硬件尚未接入），
+        保存后会写入训练记录。接入硬件后替换数据源即可，算法与图表逻辑不变。
+      </DemoNotice>
+
       <!-- 评估结论放在**最前面**。
            它原本排在右栏最后（页面的 82% 处，要滚到底才看得到）——
            而这是这一页最重要的产出。人打开评估页想知道的是"这次做得怎么样"，
