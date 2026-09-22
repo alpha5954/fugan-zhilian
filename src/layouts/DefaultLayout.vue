@@ -44,7 +44,26 @@ const ROLE_LABEL: Record<UserRole, string> = {
   admin: '管理员',
 }
 
-const roleLabel = computed(() => (user.role ? ROLE_LABEL[user.role] : '未建档'))
+/**
+ * 顶栏用户名旁边那个角色标签。
+ *
+ * ⚠️ **患者不显示。** 这套系统的主要使用者就是患者本人，在自己的账号后面
+ *    再挂一个「患者」既没有信息量，读起来也别扭 —— 打开页面第一眼看到
+ *    「张三 患者」，像在提醒他"你是个病人"。
+ *
+ *    家属 / 治疗师要显示：那两类的**数据范围不同**（家属看的是监护对象的
+ *    数据，不是自己的），标出来才知道自己正以什么身份在看。
+ *
+ *    没有角色的（登录了但还没选身份）显示「未建档」—— 那是个需要处理的
+ *    状态，不是可以省掉的信息。
+ *
+ * 类型里仍然保留 'patient'：别的页面上"这个人是患者"是有意义的
+ * （比如监护管理里要区分关系双方），这里只是不往用户名后面挂。
+ */
+const roleLabel = computed(() => {
+  if (!user.role) return '未建档'
+  return user.role === 'patient' ? '' : ROLE_LABEL[user.role]
+})
 
 // 未登录时（比如在公开的「关于」页）不显示主导航
 const showNav = computed(() => user.isLoggedIn)
@@ -134,7 +153,9 @@ async function handleCommand(command: string) {
           <el-dropdown @command="handleCommand">
             <span class="account">
               <span class="account__name">{{ user.displayName }}</span>
-              <span class="account__role">{{ roleLabel }}</span>
+              <!-- roleLabel 可能为空串（患者不显示角色），用 v-if 而不是
+                   留一个空的 span —— 那会撑出一个多余的间距 -->
+              <span v-if="roleLabel" class="account__role">{{ roleLabel }}</span>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
