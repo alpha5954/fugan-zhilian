@@ -76,15 +76,23 @@ export interface TrendSeries {
   name: string
   /** 与 dates 等长，缺数据处为 null */
   data: (number | null)[]
-  color: string
+  /**
+   * 分类色的**索引**，不是色值。
+   *
+   * 这个模块是纯函数、运行时没有 DOM，读不了 CSS 令牌。而色值的唯一
+   * 来源必须是 tokens.css —— 所以这里只回索引，由视图层用
+   * chartTheme 的 seriesColor() 解析成字面值。
+   *
+   * （改造前这里直接写着 '#409eff' 等，那是 Element Plus 的默认调色板，
+   *   和整套品牌色不是一家的。）
+   */
+  colorIndex: number
 }
 
 export interface TrendResult {
   dates: string[]
   series: TrendSeries[]
 }
-
-const SERIES_COLOR = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c'] as const
 
 /**
  * 按动作分别画出活动度趋势。
@@ -106,7 +114,7 @@ export function buildTrendByExercise(sessions: RehabSession[]): TrendResult {
 
   const series: TrendSeries[] = present.map((exercise, i) => ({
     name: exercise,
-    color: SERIES_COLOR[i % SERIES_COLOR.length],
+    colorIndex: i,
     data: dates.map((date) => {
       const daySessions = (byDate.get(date) ?? []).filter(
         (s) => s.exercise === exercise,
@@ -201,14 +209,15 @@ export function buildTemperatureHistory(sessions: RehabSession[]): TemperatureRe
 export interface DistributionItem {
   name: string
   value: number
-  color: string
+  /** 同 TrendSeries.colorIndex，由视图层解析成色值 */
+  colorIndex: number
 }
 
 export function buildExerciseDistribution(sessions: RehabSession[]): DistributionItem[] {
   return REHAB_EXERCISES.map((exercise, i) => ({
     name: exercise,
     value: sessions.filter((s) => s.exercise === exercise).length,
-    color: SERIES_COLOR[i % SERIES_COLOR.length] as string,
+    colorIndex: i,
   })).filter((d) => d.value > 0)
 }
 

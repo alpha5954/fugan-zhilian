@@ -34,6 +34,30 @@ export interface ChartMarkLine {
   label: string
   color: string
 }
+
+/**
+ * 数值区间的高亮带，用于表达「安全区 / 危险区」。
+ *
+ * 与标线的区别：标线是一条线，只能表达"这里是阈值"；色带能表达
+ * "越过这条线之后的区域是危险的"。温度这类安全参数需要后者 ——
+ * 患者看到自己在色带下方，比看到一条碰不到的虚线直观得多。
+ */
+export interface ChartMarkArea {
+  from: number
+  to: number
+  /** 色带的填充色。通常是品牌色加很低的透明度 */
+  color: string
+  /** 色带内的文字，可为空 */
+  label?: string
+  /**
+   * 文字的**实心**颜色。
+   *
+   * ⚠️ 必须和 color 分开传。色带色是加了透明度的（`#a8262614` = 8%），
+   *    拿它当文字色的话标签几乎看不见 —— 实测踩过，色带上"危险区"
+   *    三个字淡得像没渲染出来。
+   */
+  labelColor?: string
+}
 </script>
 
 <script setup lang="ts">
@@ -49,11 +73,24 @@ import { LineChart } from 'echarts/charts'
 import {
   GridComponent,
   LegendComponent,
+  MarkAreaComponent,
   MarkLineComponent,
   TooltipComponent,
 } from 'echarts/components'
 import * as echarts from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
+import {
+  areaGradient,
+  axisLabelStyle,
+  axisPointerStyle,
+  categoryAxisLineStyle,
+  categoryInterval,
+  formatValue,
+  gridStyle,
+  splitLineStyle,
+  tooltipStyle,
+  valueAxisLineStyle,
+} from '@/lib/chartTheme'
 import { token } from '@/lib/theme'
 
 echarts.use([
@@ -62,6 +99,7 @@ echarts.use([
   TooltipComponent,
   LegendComponent,
   MarkLineComponent,
+  MarkAreaComponent,
   CanvasRenderer,
 ])
 
@@ -71,6 +109,7 @@ const props = withDefaults(
     xData: string[]
     yAxes?: ChartAxis[]
     markLines?: ChartMarkLine[]
+    markAreas?: ChartMarkArea[]
     height?: number
     /** Y 轴数值保留几位小数 */
     digits?: number
@@ -78,6 +117,7 @@ const props = withDefaults(
   {
     yAxes: () => [{ position: 'left' }],
     markLines: () => [],
+    markAreas: () => [],
     height: 200,
     digits: 2,
   },
@@ -92,47 +132,47 @@ function buildOption() {
 
   return {
     animation: false, // 实时流式刷新下动画只会造成拖影
-    grid: {
-      left: 8,
-      right: axes.length > 1 ? 8 : 12,
-      top: props.markLines.length ? 28 : 12,
-      bottom: 4,
-      containLabel: true,
-    },
+    grid: gridStyle({
+      hasMarkLine: props.markLines.length > 0,
+      axes: axes.length,
+    }),
     tooltip: {
       trigger: 'axis',
       // 实时刷新时 tooltip 会疯狂重绘，关闭动画并限制显示条数
       animation: false,
       confine: true,
-      axisPointer: { type: 'line', animation: false },
-      textStyle: { fontSize: 12 },
-      valueFormatter: (v: unknown) =>
-        typeof v === 'number' ? v.toFixed(props.digits) : String(v),
+      // 外观统一走 chartTheme —— 默认的白框圆角一眼就是"没调过"
+      ...tooltipStyle(),
+      axisPointer: axisPointerStyle(),
+      valueFormatter: (v: unknown) => formatValue(v, props.digits),
     },
     legend: { show: false }, // 图例由外层 HTML 渲染，样式更可控
     xAxis: {
       type: 'category',
       data: props.xData,
       boundaryGap: false,
-      axisLine: { lineStyle: { color: token('--line') } },
+      axisLine: categoryAxisLineStyle(),
       axisTick: { show: false },
-      axisLabel: { color: token('--ink-300'), fontSize: 10, interval: 'auto' },
+      // 抽稀：默认的 auto 会算出二十几个刻度，密到读不出来
+      axisLabel: axisLabelStyle({ interval: categoryInterval(props.xData.length) }),
       splitLine: { show: false },
     },
     yAxis: axes.map((axis, i) => ({
       type: 'value' as const,
       name: axis.name,
-      nameTextStyle: { color: token('--ink-300'), fontSize: 10 },
+      nameTextStyle: axisLabelStyle({ align: 'left' }),
       position: axis.position ?? (i === 1 ? 'right' : 'left'),
       min: axis.min,
       max: axis.max,
+      // scale 让坐标轴贴合数据范围而不是从 0 起。
+      // ⚠️ 只有在调用方没指定 min 时才开 —— 显式指定了范围就按指定的来
       scale: axis.min === undefined,
-      axisLine: { show: false },
+      // 网格线少几条。默认 5 条铺满之后会织成一张网，把数据压下去
+      splitNumber: 4,
+      axisLine: valueAxisLineStyle(),
       axisTick: { show: false },
-      axisLabel: { color: token('--ink-300'), fontSize: 10 },
-      splitLine: {
-        lineStyle: { color: token('--line-soft'), type: i === 0 ? 'solid' : 'dashed' },
-      },
+      axisLabel: axisLabelStyle(),
+      splitLine: splitLineStyle(),
     })),
     series: props.series.map((s) => {
       // 只有第一条序列挂标线，避免标线被重复绘制
@@ -150,19 +190,30 @@ function buildOption() {
         sampling: s.sampling === false ? undefined : ('lttb' as const),
         lineStyle: { width: s.width ?? 1.4, color: s.color },
         itemStyle: { color: s.color },
-        areaStyle: s.area
+        areaStyle: s.area ? areaGradient(s.color) : undefined,
+        markArea: s === props.series[0] && props.markAreas.length
           ? {
-              color: {
-                type: 'linear' as const,
-                x: 0,
-                y: 0,
-                x2: 0,
-                y2: 1,
-                colorStops: [
-                  { offset: 0, color: `${s.color}33` },
-                  { offset: 1, color: `${s.color}00` },
-                ],
-              },
+              silent: true,
+              animation: false,
+              itemStyle: { color: props.markAreas[0]!.color },
+              data: props.markAreas.map((a) => [
+                {
+                  yAxis: a.from,
+                  ...(a.label
+                    ? {
+                        label: {
+                          show: true,
+                          position: 'insideTopLeft' as const,
+                          color: a.labelColor ?? a.color,
+                          fontSize: 10,
+                          fontFamily: token('--font-num'),
+                          formatter: a.label,
+                        },
+                      }
+                    : {}),
+                },
+                { yAxis: a.to },
+              ]),
             }
           : undefined,
         markLine: withMark
@@ -177,6 +228,7 @@ function buildOption() {
                   formatter: m.label,
                   color: m.color,
                   fontSize: 10,
+                  fontFamily: token('--font-num'),
                   position: 'insideEndTop' as const,
                 },
               })),

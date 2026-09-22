@@ -22,6 +22,7 @@ import {
   summarize,
 } from '@/lib/analysis'
 import { REHAB_EXERCISES } from '@/lib/assessment'
+import { seriesColor } from '@/lib/chartTheme'
 import { formatDateTime } from '@/lib/format'
 import { useCareStore } from '@/stores/care'
 import { useSessionStore } from '@/stores/session'
@@ -104,6 +105,15 @@ const compare = computed(() => compareExercises(filtered.value))
 const temperature = computed(() => buildTemperatureHistory(filtered.value))
 const distribution = computed(() => buildExerciseDistribution(filtered.value))
 
+/** 饼图要的是带色值的数据，把索引解析掉 */
+const pieData = computed(() =>
+  distribution.value.map((d) => ({
+    name: d.name,
+    value: d.value,
+    color: seriesColor(d.colorIndex),
+  })),
+)
+
 const hasData = computed(() => filtered.value.length > 0)
 
 // ---------------------------------------------------------------------------
@@ -113,7 +123,7 @@ const trendSeries = computed<ChartSeries[]>(() =>
   trend.value.series.map((s) => ({
     name: s.name,
     data: s.data,
-    color: s.color,
+    color: seriesColor(s.colorIndex),
     smooth: true,
     width: 1.8,
   })),
@@ -282,7 +292,7 @@ onMounted(load)
             <h3 class="panel__title">关节活动度趋势</h3>
             <div class="panel__legend">
               <span v-for="s in trend.series" :key="s.name" class="legend__item">
-                <span class="legend__dot" :style="{ background: s.color }" />
+                <span class="legend__dot" :style="{ background: seriesColor(s.colorIndex) }" />
                 {{ s.name }}
               </span>
             </div>
@@ -342,11 +352,13 @@ onMounted(load)
             <h3 class="panel__title">动作分布</h3>
             <span class="panel__unit">次</span>
           </header>
-          <PieChart v-if="distribution.length" :data="distribution" :height="240" />
+          <!-- 数据层只给分类索引，颜色在这里解析成字面值 ——
+             色值的唯一来源仍是 tokens.css -->
+        <PieChart v-if="distribution.length" :data="pieData" :height="240" />
           <el-empty v-else description="暂无数据" :image-size="60" />
           <div class="legend">
             <span v-for="d in distribution" :key="d.name" class="legend__item">
-              <span class="legend__dot" :style="{ background: d.color }" />
+              <span class="legend__dot" :style="{ background: seriesColor(d.colorIndex) }" />
               {{ d.name }} · {{ d.value }} 次
             </span>
           </div>

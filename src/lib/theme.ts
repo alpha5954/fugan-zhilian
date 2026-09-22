@@ -31,6 +31,20 @@ export function token(name: `--${string}`): string {
     value = getComputedStyle(document.documentElement)
       .getPropertyValue(name)
       .trim()
+    // 把内部空白压成单个空格。
+    //
+    // 【为什么】tokens.css 里的长值（字体栈、阴影）是折行写的，
+    // getComputedStyle 会把换行和缩进原样返回：
+    //
+    //   "'PingFang SC', ..., 'Microsoft YaHei',\n    'Hiragino Sans GB', ..."
+    //
+    // canvas 的 ctx.font **自己会归一化空白**（实测过：把带换行的值
+    // 赋给它，读回来是干净的字符串），所以图表那边本来就没受影响 ——
+    // 我一开始以为是这里的问题，查错了方向，记一笔免得后人重走。
+    //
+    // 真正的理由是**内联 style 字符串不行**：tooltipStyle() 里拼的
+    // `box-shadow: ${token('--shadow-md')}` 一旦遇到带换行的值就会
+    // 静默失效。压平是零成本的保险。
     cache.set(name, value)
   }
   return value

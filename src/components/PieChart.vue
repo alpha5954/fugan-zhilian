@@ -19,6 +19,7 @@ import { PieChart as EPieChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import * as echarts from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
+import { tooltipStyle } from '@/lib/chartTheme'
 import { token } from '@/lib/theme'
 
 echarts.use([EPieChart, TooltipComponent, CanvasRenderer])
@@ -47,7 +48,7 @@ function buildOption() {
     tooltip: {
       trigger: 'item',
       confine: true,
-      textStyle: { fontSize: 12 },
+      ...tooltipStyle(),
       formatter: (p: { name: string; value: number; percent: number }) =>
         `${p.name}<br/>${p.value} 次（${p.percent}%）`,
     },

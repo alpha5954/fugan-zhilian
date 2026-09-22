@@ -34,6 +34,14 @@ import {
 } from 'echarts/components'
 import * as echarts from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
+import {
+  axisLabelStyle,
+  categoryAxisLineStyle,
+  categoryInterval,
+  splitLineStyle,
+  tooltipStyle,
+  valueAxisLineStyle,
+} from '@/lib/chartTheme'
 import { token } from '@/lib/theme'
 
 echarts.use([EBarChart, GridComponent, TooltipComponent, MarkLineComponent, CanvasRenderer])
@@ -79,7 +87,7 @@ function buildOption() {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       confine: true,
-      textStyle: { fontSize: 12 },
+      ...tooltipStyle(),
       valueFormatter: (v: unknown) =>
         typeof v === 'number' ? v.toFixed(props.digits) : String(v),
     },
@@ -87,20 +95,21 @@ function buildOption() {
     xAxis: {
       type: 'category',
       data: props.xData,
-      axisLine: { lineStyle: { color: token('--line') } },
+      axisLine: categoryAxisLineStyle(),
       axisTick: { show: false },
-      axisLabel: { color: token('--ink-400'), fontSize: 11 },
+      axisLabel: axisLabelStyle({ interval: categoryInterval(props.xData.length) }),
     },
     yAxis: {
       type: 'value',
       name: props.yName,
-      nameTextStyle: { color: token('--ink-300'), fontSize: 10 },
+      nameTextStyle: axisLabelStyle({ align: 'left' }),
       min: props.yMin,
       max: props.yMax,
-      axisLine: { show: false },
+      splitNumber: 4,
+      axisLine: valueAxisLineStyle(),
       axisTick: { show: false },
-      axisLabel: { color: token('--ink-300'), fontSize: 10 },
-      splitLine: { lineStyle: { color: token('--line-soft') } },
+      axisLabel: axisLabelStyle(),
+      splitLine: splitLineStyle(),
     },
     series: props.series.map((s, si) => ({
       type: 'bar' as const,
@@ -136,6 +145,7 @@ function buildOption() {
                   formatter: m.label,
                   color: m.color,
                   fontSize: 10,
+                  fontFamily: token('--font-num'),
                   position: 'insideEndTop' as const,
                 },
               })),

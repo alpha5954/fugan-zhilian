@@ -31,6 +31,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
   /* 中文在 Windows 上的默认渲染偏细，这个设置让笔画更均匀 */
   text-rendering: optimizeLegibility;
+
+  /* 数字一律用等宽字形（tabular figures）。
+     界面里到处都是需要纵向对齐的数值 —— 状态栏、指标卡、表格、图表轴
+     —— 比例数字宽度不一，永远对不齐。**"数字对不齐"是不精密最直接的
+     来源**，而这一条的成本只有一行。
+
+     全局设了之后，各处就不必再零散地加 .num 类。中文与标点不受影响。 */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
 }
 
 h1,

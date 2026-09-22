@@ -116,6 +116,34 @@ const tempMarkLines = computed(() => [
   { value: tempThreshold, label: `预警 ${tempThreshold} °C`, color: token('--danger') },
 ])
 
+/**
+ * 危险区色带。
+ *
+ * 【为什么温度图的 Y 轴不能自适应】
+ * 试过让范围贴合数据 —— 康复训练时皮温就在 33 上下，自适应之后曲线
+ * 确实占满绘图区，好看得多。**但 45 °C 的预警线直接跑到了屏幕外。**
+ *
+ * 温度是**安全参数**：患者要看的不是"我的体温在 33.02 和 33.10 之间波动"，
+ * 而是"我离烫伤还有多远"。为了好看把警戒线弄丢，方向反了。
+ * 低温烫伤预警是这个产品的核心价值（见 README），这条不能妥协。
+ *
+ * 【空白怎么办】
+ * 固定范围必然留大片空白。用这道色带把空白变成信息：
+ * 曲线在色带**下方** = 安全，一眼就能判断，不需要读数字。
+ */
+const tempMarkAreas = computed(() => [
+  {
+    from: tempThreshold,
+    to: 52,
+    // 用品牌色令牌加透明度而不是写死颜色，改了主题这里跟着变。
+    // 8% 的浓度足够看出是一块区域，又不会把曲线压下去
+    color: `${token('--danger')}14`,
+    label: '危险区',
+    // 文字要用**实心**色，不能跟着色带走 —— 8% 透明度的字看不见
+    labelColor: token('--danger'),
+  },
+])
+
 /** 解耦图每个序列都带图例色块，其余图只有一条线不需要 */
 const decoupleLegend = [
   { name: '原始信号', color: token('--ink-400') },
@@ -250,11 +278,15 @@ const decoupleLegend = [
           <h3 class="panel__title">局部温度</h3>
           <span class="panel__unit">°C</span>
         </header>
+        <!-- 温度图的 Y 轴**必须固定范围**，不能像其他图那样自适应（见下方
+             tempMarkAreas 的注释）。范围取 30–52：覆盖热敷监测 40→50 的
+             全过程，并把 45 °C 的警戒线留在可见区内。 -->
         <SignalChart
           :series="tempChart"
           :x-data="timeAxis"
           :y-axes="[{ name: '°C', position: 'left', min: 30, max: 52 }]"
           :mark-lines="tempMarkLines"
+          :mark-areas="tempMarkAreas"
           :height="200"
           :digits="2"
         />
@@ -321,7 +353,10 @@ const decoupleLegend = [
 
 .statusbar__dot.is-live {
   background: var(--ok);
-  box-shadow: 0 0 0 3px rgb(103 194 58 / 18%);
+  /* 呼吸光晕。用项目自己的绿（--ok = #1c6b47）而不是 Element Plus
+     默认的 #67c23a —— 后者是消费级配色，和整套语义色不是一家的。
+     这种"差一点"最伤整体感：单看没问题，和其他绿摆一起就露馅。 */
+  box-shadow: 0 0 0 3px rgb(28 107 71 / 16%);
 }
 
 .statusbar__dot.is-idle {
@@ -340,13 +375,27 @@ const decoupleLegend = [
   gap: 6px;
 }
 
+/* 数值部分（温度和运行时长）走等宽数字。
+   全局已经开了 tabular-nums，这里再显式声明一次是为了让意图可见 ——
+   状态栏每秒刷新十次，数字宽度不稳会整行抖动。 */
+.statusbar__value--mono {
+  font-variant-numeric: tabular-nums;
+}
+
 .statusbar__label {
-  font-size: 12px;
+  /* 标签退一档、加字距 —— 读起来像"刻度名"而不是正文。
+     字号刻意用硬编码而不是令牌：状态栏是**仪表**，它的密度比正文
+     更紧，跟着全局字号走反而会散。 */
+  font-size: 11px;
   color: var(--ink-400);
+  letter-spacing: 0.4px;
 }
 
 .statusbar__value {
-  font-size: 13px;
+  /* 值进一档并加粗一档。**标签与值的层级差是"仪表感"的来源** ——
+     两者一样大时读起来是一句话；拉开之后眼睛会先抓到数字。 */
+  font-size: 14px;
+  font-weight: var(--fw-medium);
   color: var(--ink-800);
 }
 

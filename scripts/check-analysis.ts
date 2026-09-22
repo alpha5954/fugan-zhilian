@@ -190,7 +190,10 @@ check('各动作次数之和等于总记录数',
   `${d6.reduce((a, d) => a + d.value, 0)} = ${mixed.length}`)
 check('未出现的动作不出现在饼图里', d6.length === 2,
   `出现 ${d6.length} 个（实际用了 ${new Set(mixed.map((s) => s.exercise)).size} 个动作）`)
-check('每项都有配色', d6.every((d) => d.color.startsWith('#')))
+check(
+  '每项都有配色索引（颜色由视图层解析，数据层不持有色值）',
+  d6.every((d) => Number.isInteger(d.colorIndex) && d.colorIndex >= 0),
+)
 
 // ---------------------------------------------------------------- 概要
 console.log()

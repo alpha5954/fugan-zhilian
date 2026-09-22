@@ -26,6 +26,14 @@ import {
 } from 'echarts/components'
 import * as echarts from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
+import {
+  axisLabelStyle,
+  axisPointerStyle,
+  categoryAxisLineStyle,
+  splitLineStyle,
+  tooltipStyle,
+  valueAxisLineStyle,
+} from '@/lib/chartTheme'
 import { token } from '@/lib/theme'
 
 echarts.use([
@@ -85,11 +93,12 @@ function buildOption() {
   return {
     animation: true,
     animationDuration: 320,
-    grid: { left: 8, right: 16, top: 28, bottom: 4, containLabel: true },
+    grid: { left: 8, right: 16, top: 26, bottom: 4, containLabel: true },
     tooltip: {
       trigger: 'axis',
       confine: true,
-      textStyle: { fontSize: 12 },
+      ...tooltipStyle(),
+      axisPointer: axisPointerStyle(),
       valueFormatter: (v: unknown) => (typeof v === 'number' ? v.toFixed(4) : String(v)),
     },
     legend: { show: false },
@@ -98,20 +107,22 @@ function buildOption() {
       name: '关节角度 (°)',
       nameLocation: 'middle' as const,
       nameGap: 26,
-      nameTextStyle: { color: token('--ink-400'), fontSize: 11 },
+      nameTextStyle: axisLabelStyle(),
       min: 0,
-      axisLine: { lineStyle: { color: token('--line') } },
-      axisLabel: { color: token('--ink-300'), fontSize: 10 },
-      splitLine: { lineStyle: { color: token('--line-soft') } },
+      splitNumber: 4,
+      axisLine: categoryAxisLineStyle(),
+      axisLabel: axisLabelStyle(),
+      splitLine: splitLineStyle(),
     },
     yAxis: {
       type: 'value' as const,
       name: '肌电 RMS (mV)',
-      nameTextStyle: { color: token('--ink-400'), fontSize: 11 },
-      axisLine: { show: false },
+      nameTextStyle: axisLabelStyle({ align: 'left' }),
+      splitNumber: 4,
+      axisLine: valueAxisLineStyle(),
       axisTick: { show: false },
-      axisLabel: { color: token('--ink-300'), fontSize: 10 },
-      splitLine: { lineStyle: { color: token('--line-soft') } },
+      axisLabel: axisLabelStyle(),
+      splitLine: splitLineStyle(),
     },
     series: series.map((s, i) => ({
       ...s,
@@ -130,6 +141,7 @@ function buildOption() {
                     formatter: `峰值 ${props.peakAngle}°`,
                     color: token('--danger'),
                     fontSize: 10,
+                    fontFamily: token('--font-num'),
                     position: 'insideEndTop' as const,
                   },
                 },
