@@ -263,7 +263,20 @@ try {
 
     blocked = false
     await page.getByRole('link', { name: /返回应用/ }).click()
-    await page.waitForTimeout(3000)
+
+    // 等**真实的跳转**，不要睡固定时长。
+    //
+    // 原先写的是 waitForTimeout(3000)，在 Supabase 响应慢的时候不够 ——
+    // 实测跑三次失败一次，而每次跑代码都没变。这类断言最坑的地方在于
+    // 它看起来像代码回归，会让人去翻根本不存在的 bug。
+    await page
+      .waitForFunction(() => location.pathname.endsWith('/monitor'), null, {
+        timeout: 15000,
+      })
+      .catch(() => {
+        // 超时就让它落到下面的断言上失败，并打印实际停在哪
+      })
+
     const second = new URL(page.url()).pathname
     check(
       '网络恢复后不必刷新页面就能重试成功',

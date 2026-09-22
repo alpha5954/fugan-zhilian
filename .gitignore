@@ -33,3 +33,9 @@ desktop.ini
 # 临时抽取的计划书副本
 _attached.pdf
 _attached.txt
+
+# 本地验证时留下的截图与临时脚本。
+# 只锚定仓库根目录 —— public/ 里的图标（favicon-*.png / logo.png / apple-touch-icon.png）
+# 是产物的一部分，必须提交，不能跟着一起被忽略。
+/*.png
+/*.mjs

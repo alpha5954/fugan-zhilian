@@ -13,6 +13,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
 import ErrorBoundary from '@/components/ErrorBoundary.vue'
+import MobileTabBar from '@/components/MobileTabBar.vue'
 import { useAlertStore } from '@/stores/alert'
 import { useCareStore } from '@/stores/care'
 import { useUserStore } from '@/stores/user'
@@ -188,6 +189,10 @@ async function handleCommand(command: string) {
         <RouterView />
       </ErrorBoundary>
     </main>
+
+    <!-- 窄屏的底部导航。宽屏下它自己不显示（见组件的样式），
+         顶部那行导航照常用 -->
+    <MobileTabBar />
   </div>
 </template>
 
@@ -435,11 +440,11 @@ async function handleCommand(command: string) {
    品牌全称在小屏上省掉 —— 保住识别度的是那个图形，不是那串字。
    ========================================================================== */
 @media (max-width: 768px) {
-  .topbar {
-    height: auto;
-    flex-wrap: wrap;
-    gap: var(--sp-2) var(--sp-3);
-    padding: var(--sp-2) var(--sp-3);
+  /* 导航整体挪到底部 tab 条了，顶栏只剩品牌与用户区 ——
+     一行装得下，不用再折成两行。（80 行→一行的变化：
+     顶栏从占 90px 降到 52px。） */
+  .nav {
+    display: none;
   }
 
   .brand__sub,
@@ -447,24 +452,18 @@ async function handleCommand(command: string) {
     display: none;
   }
 
-  .nav {
-    order: 3;
-    flex: none;
-    width: 100%;
-    height: 34px;
-  }
-
-  .nav__link {
-    padding: 0 var(--sp-2);
-  }
-
-  .nav__link::after {
-    left: var(--sp-2);
-    right: var(--sp-2);
+  .topbar {
+    gap: var(--sp-3);
+    padding: 0 var(--sp-3);
   }
 
   .main {
     padding: var(--sp-3);
+    /* 给底部 tab 条让位。少了这一条，页面最后一行会被永久挡住，
+       而且滚到底也翻不上来 —— 因为固定定位的元素不参与文档流 */
+    padding-bottom: calc(
+      56px + env(safe-area-inset-bottom, 0px) + var(--sp-5)
+    );
   }
 
   .account__name {
