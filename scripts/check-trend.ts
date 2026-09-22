@@ -162,13 +162,13 @@ console.log('\n--- 静力动作必须按「保持角度」算，不能拿活动�
   )
   check(
     '方向按保持角度判为改善',
-    it!.direction === 'up',
-    `${it!.before.toFixed(1)}° → ${it!.after.toFixed(1)}°`,
+    it!.trend!.direction === 'up',
+    `${it!.trend!.before.toFixed(1)}° → ${it!.trend!.after.toFixed(1)}°`,
   )
   check(
     '数字用的是保持角度（45~60 区间），不是活动范围（个位数）',
-    it!.after > 40,
-    `after=${it!.after.toFixed(1)}°（若是个位数说明用了 rom_deg）`,
+    it!.trend!.after > 40,
+    `after=${it!.trend!.after.toFixed(1)}°（若是个位数说明用了 rom_deg）`,
   )
 
   // ⚠️ 反向测试：活动范围在涨、保持角度没动 → 必须判"持平"
@@ -183,8 +183,8 @@ console.log('\n--- 静力动作必须按「保持角度」算，不能拿活动�
   const ri = itemOf(rev, '靠墙静蹲')!
   check(
     '活动范围在涨、保持角度没动 → 判为持平（证明用的是 hold_deg）',
-    ri.direction === 'flat',
-    `活动范围 ${8}°→${8 + 4 * 3}° 一路上涨，保持角度 ${ri.before.toFixed(1)}°→${ri.after.toFixed(1)}° → ${ri.direction}`,
+    ri.trend?.direction === 'flat',
+    `活动范围 ${8}°→${8 + 4 * 3}° 一路上涨，保持角度 ${ri.trend!.before.toFixed(1)}°→${ri.trend!.after.toFixed(1)}° → ${ri.trend?.direction}`,
   )
 }
 
@@ -193,18 +193,23 @@ console.log('\n--- 数据不足时不能编出趋势 ---')
 // ============================================================================
 {
   const two = report(run1('屈膝滑动', [60, 80]))
-  check('只有 2 天 → 不给趋势', two.items.length === 0, two.items.map((i) => i.exercise).join(','))
-  check('并且标出数据不够', two.hasEnoughData === false)
-  check('总结里说明看不出趋势', two.headline.includes('看不出'), two.headline)
+  check(
+    '只有 2 天 → 不给方向',
+    itemOf(two, '屈膝滑动')!.trend === null,
+    JSON.stringify(itemOf(two, '屈膝滑动')!.trend),
+  )
+  check('并且标出做不了趋势判断', two.hasEnoughData === false)
+  check('总结里说明看不出方向', two.headline.includes('看不出'), two.headline)
   check('总结仍然有内容（不是空字符串）', two.headline.trim().length > 0)
 
   // 边界：刚好 TREND_MIN_POINTS 天就该认账
   const exactly = report(run1('屈膝滑动', Array(TREND_MIN_POINTS).fill(70)))
   check(
-    `刚好 ${TREND_MIN_POINTS} 天就算够用`,
-    exactly.items.length === 1,
-    `得到 ${exactly.items.length} 个动作`,
+    `刚好 ${TREND_MIN_POINTS} 天就有方向了`,
+    exactly.items.length === 1 && exactly.items[0]!.trend !== null,
+    `得到 ${exactly.items.length} 个动作，trend=${JSON.stringify(exactly.items[0]?.trend?.direction ?? null)}`,
   )
+  check('这时 hasEnoughData 为真', exactly.hasEnoughData === true)
 
   // 一天练多次不能当多天用
   const sameDay = report([
@@ -215,12 +220,116 @@ console.log('\n--- 数据不足时不能编出趋势 ---')
   ])
   check(
     '同一天的多次记录只算一天',
-    sameDay.items.length === 0,
-    `4 条记录但只有 1 天 → ${sameDay.items.length} 个动作`,
+    itemOf(sameDay, '屈膝滑动')!.points === 1,
+    `4 条记录但只有 1 天 → points=${itemOf(sameDay, '屈膝滑动')!.points}`,
+  )
+  check(
+    '只算一天 → 也不给方向',
+    itemOf(sameDay, '屈膝滑动')!.trend === null,
   )
 
   const empty = report([])
-  check('空数据不报错且有话说', empty.headline.length > 0 && empty.items.length === 0, empty.headline)
+  check(
+    '完全没有记录时 items 为空（不是一条空条目）',
+    empty.headline.length > 0 && empty.items.length === 0,
+    empty.headline,
+  )
+}
+
+// ============================================================================
+console.log('\n--- 方向判不出来时，达标状态照样给 ---')
+// ============================================================================
+// "在往哪个方向走"和"现在达没达标"是两件事：
+//
+//   方向  需要 ≥ TREND_MIN_POINTS 天，两三个点连不出趋势
+//   达标  一次训练就能回答
+//
+// 原先天数不够时整条丢掉，于是刚练了三天的患者、或者选了「近 7 天」的
+// 用户，界面上**一个动作都不显示** —— 连"哪个达标了"都看不到，
+// 而那是数据完全支持回答的问题。
+{
+  const few = report([
+    sess('屈膝滑动', 95, 1),
+    sess('坐位伸膝', 60, 0),
+  ])
+
+  check(
+    '记录少也照样列出动作',
+    few.items.length === 2,
+    few.items.map((i) => i.exercise).join(','),
+  )
+
+  const slide = itemOf(few, '屈膝滑动')!
+  check('没有方向', slide.trend === null)
+  check('但给出最近一次的值', Math.abs(slide.latest - 95) < 1e-9, String(slide.latest))
+  check('也给出达标判定', slide.onTarget === true, `目标 ${slide.target}°`)
+  check('以及统计到的天数', slide.points === 1, String(slide.points))
+
+  const knee = itemOf(few, '坐位伸膝')!
+  check(
+    '没达标的那个也照实说',
+    knee.onTarget === false,
+    `最近 ${knee.latest}° / 目标 ${knee.target}°`,
+  )
+  // 差 20°/80° = 25%，没超过三成 → 黄灯
+  check('灯按"差多少"给，不需要趋势', knee.band === 'yellow', knee.band)
+
+  // 总结要把"能答的答掉"，不能只说一句"看不出趋势"就停
+  check(
+    '总结里报了达标个数',
+    few.headline.includes('1/2') || few.headline.includes('达到目标'),
+    few.headline,
+  )
+}
+
+// ============================================================================
+console.log('\n--- 记录太少时不能说"没有变化" ---')
+// ============================================================================
+// ⚠️ 这条是本次改动里最容易写错的：**"看不出来"和"没变化"是两回事。**
+//
+// 只有两天记录、而且没达标时，可以报"记录太少、看不出变化、且未达标"
+// （那是事实），但**不能**报"没有明显变化"（那是编了一个我们并不知道的
+// 结论）。两条结论必须分开，键也不一样。
+{
+  const few = report([
+    sess('坐位伸膝', 50, 1),
+    sess('坐位伸膝', 50, 0),
+  ])
+  const keys = keysOf(few)
+
+  check(
+    '记录不足且未达标 → 给的是"记录还太少"那条',
+    keys.includes('trend_insufficient'),
+    keys.join(','),
+  )
+  check(
+    '不能给"没有明显变化"那条（那是编结论）',
+    !keys.includes('trend_stuck'),
+    keys.join(','),
+  )
+  check(
+    '措辞里点出"看不出变化"而不是"没有变化"',
+    few.findings.find((f) => f.key === 'trend_insufficient')!.label.includes('看不出'),
+    few.findings.find((f) => f.key === 'trend_insufficient')!.label,
+  )
+  check(
+    '依据里写清了只有几天记录',
+    few.findings.find((f) => f.key === 'trend_insufficient')!.evidence.includes('天记录'),
+    few.findings.find((f) => f.key === 'trend_insufficient')!.evidence,
+  )
+
+  // 反过来：记录够了、确实是持平的，才该给 trend_stuck
+  const enough = report(run1('坐位伸膝', [50, 50, 50, 50]))
+  check(
+    '记录够了且确实持平 → 给"没有明显变化"那条',
+    keysOf(enough).includes('trend_stuck'),
+    keysOf(enough).join(','),
+  )
+  check(
+    '不再给"记录太少"那条',
+    !keysOf(enough).includes('trend_insufficient'),
+    keysOf(enough).join(','),
+  )
 }
 
 // ============================================================================
@@ -231,31 +340,31 @@ console.log('\n--- 方向的判定与门槛 ---')
   const up = report(run1('屈膝滑动', [60, 62, 70, 72]))
   check(
     '明显上升 → up',
-    itemOf(up, '屈膝滑动')!.direction === 'up',
-    `${itemOf(up, '屈膝滑动')!.before.toFixed(1)} → ${itemOf(up, '屈膝滑动')!.after.toFixed(1)}`,
+    itemOf(up, '屈膝滑动')!.trend!.direction === 'up',
+    `${itemOf(up, '屈膝滑动')!.trend!.before.toFixed(1)} → ${itemOf(up, '屈膝滑动')!.trend!.after.toFixed(1)}`,
   )
 
   const down = report(run1('屈膝滑动', [80, 78, 70, 68]))
   check(
     '明显下降 → down',
-    itemOf(down, '屈膝滑动')!.direction === 'down',
-    `${itemOf(down, '屈膝滑动')!.before.toFixed(1)} → ${itemOf(down, '屈膝滑动')!.after.toFixed(1)}`,
+    itemOf(down, '屈膝滑动')!.trend!.direction === 'down',
+    `${itemOf(down, '屈膝滑动')!.trend!.before.toFixed(1)} → ${itemOf(down, '屈膝滑动')!.trend!.after.toFixed(1)}`,
   )
 
   // 变化 7.0° < 门槛 7.2° → 持平
   const small = report(run1('屈膝滑动', [80, 80, 87, 87]))
   check(
     '变化 7.0° 未达门槛 7.2° → 持平',
-    itemOf(small, '屈膝滑动')!.direction === 'flat',
-    `${itemOf(small, '屈膝滑动')!.delta.toFixed(1)}° / 门槛 ${itemOf(small, '屈膝滑动')!.threshold.toFixed(1)}°`,
+    itemOf(small, '屈膝滑动')!.trend!.direction === 'flat',
+    `${itemOf(small, '屈膝滑动')!.trend!.delta.toFixed(1)}° / 门槛 ${itemOf(small, '屈膝滑动')!.trend!.threshold.toFixed(1)}°`,
   )
 
   // 变化 8.0° > 门槛 → 上升
   const over = report(run1('屈膝滑动', [80, 80, 88, 88]))
   check(
     '变化 8.0° 超过门槛 → 上升',
-    itemOf(over, '屈膝滑动')!.direction === 'up',
-    `${itemOf(over, '屈膝滑动')!.delta.toFixed(1)}° / 门槛 ${itemOf(over, '屈膝滑动')!.threshold.toFixed(1)}°`,
+    itemOf(over, '屈膝滑动')!.trend!.direction === 'up',
+    `${itemOf(over, '屈膝滑动')!.trend!.delta.toFixed(1)}° / 门槛 ${itemOf(over, '屈膝滑动')!.trend!.threshold.toFixed(1)}°`,
   )
 
   // ⚠️ 门槛按**目标的比例**算，不是固定度数。
@@ -265,21 +374,21 @@ console.log('\n--- 方向的判定与门槛 ---')
   const slideSame = report(run1('屈膝滑动', [80, 80, 82.5, 82.5]))
   check(
     '同样涨 2.5°：直腿抬高算进步（门槛 2°）',
-    itemOf(legRaise, '直腿抬高')!.direction === 'up',
-    `门槛 ${itemOf(legRaise, '直腿抬高')!.threshold.toFixed(1)}°`,
+    itemOf(legRaise, '直腿抬高')!.trend!.direction === 'up',
+    `门槛 ${itemOf(legRaise, '直腿抬高')!.trend!.threshold.toFixed(1)}°`,
   )
   check(
     '同样涨 2.5°：屈膝滑动算持平（门槛 7.2°）',
-    itemOf(slideSame, '屈膝滑动')!.direction === 'flat',
-    `门槛 ${itemOf(slideSame, '屈膝滑动')!.threshold.toFixed(1)}°`,
+    itemOf(slideSame, '屈膝滑动')!.trend!.direction === 'flat',
+    `门槛 ${itemOf(slideSame, '屈膝滑动')!.trend!.threshold.toFixed(1)}°`,
   )
 
   // 门槛边界用整数构造，避免浮点误差：直腿抬高门槛恰好 2.0，涨 2.0 不算超
   const exact = report(run1('直腿抬高', [8, 8, 10, 10]))
   check(
     '恰好等于门槛 → 持平（判定用严格大于）',
-    itemOf(exact, '直腿抬高')!.direction === 'flat',
-    `Δ${itemOf(exact, '直腿抬高')!.delta.toFixed(1)}° / 门槛 ${itemOf(exact, '直腿抬高')!.threshold.toFixed(1)}°`,
+    itemOf(exact, '直腿抬高')!.trend!.direction === 'flat',
+    `Δ${itemOf(exact, '直腿抬高')!.trend!.delta.toFixed(1)}° / 门槛 ${itemOf(exact, '直腿抬高')!.trend!.threshold.toFixed(1)}°`,
   )
 }
 
@@ -461,8 +570,8 @@ console.log('\n--- 每个动作都要有目标可依 ---')
   )
   check(
     '门槛按目标的比例算（90 × 8% = 7.2°）',
-    Math.abs(it.threshold - 7.2) < 0.001,
-    String(it.threshold),
+    Math.abs(it.trend!.threshold - 7.2) < 0.001,
+    String(it.trend!.threshold),
   )
 }
 

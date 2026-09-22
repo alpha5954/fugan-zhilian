@@ -23,6 +23,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
+import DemoNotice from '@/components/DemoNotice.vue'
 import RiskBadge from '@/components/RiskBadge.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import { buildDemoAlerts, buildDemoSessions } from '@/lib/demoData'
@@ -182,13 +183,10 @@ onMounted(reload)
          项目的一条底线是不把模拟数据说成实测数据（见 README「数据来源」）。
          演示数据同样适用：用了就必须明确标出来，而且要给出路 ——
          告诉用户怎么才能看到自己的真实数据 -->
-    <aside v-if="usingDemo" class="demo" role="note">
-      <span class="demo__tag">演示数据</span>
-      <p class="demo__text">
-        您还没有训练记录，下面用一组示例数据展示系统能给出什么样的结论。
-        绑定传感器并完成第一次训练后，这里会自动换成您自己的数据。
-      </p>
-    </aside>
+    <DemoNotice v-if="usingDemo">
+      您还没有训练记录，下面用一组示例数据展示系统能给出什么样的结论。
+      绑定传感器并完成第一次训练后，这里会自动换成您自己的数据。
+    </DemoNotice>
 
     <!-- ================= 健康评分 ================= -->
     <section
@@ -399,39 +397,7 @@ onMounted(reload)
   color: var(--ink-500);
 }
 
-/* ==========================================================================
-   演示数据声明
-   ==========================================================================
-   做成中性的信息条而不是警告条：这不是错误，只是要如实说明数据来源。
-   ========================================================================== */
-.demo {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
-  border: 1px solid var(--info-line);
-  border-radius: var(--r-md);
-  background: var(--info-bg);
-}
-
-.demo__tag {
-  flex-shrink: 0;
-  padding: 2px 8px;
-  border-radius: var(--r-xs);
-  background: var(--brand-700);
-  color: #fff;
-  font-size: var(--fs-micro);
-  font-weight: var(--fw-medium);
-  line-height: 1.7;
-  white-space: nowrap;
-}
-
-.demo__text {
-  margin: 0;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-loose);
-  color: var(--ink-600);
-}
+/* .demo* 的样式搬到了 components/DemoNotice.vue —— 分析页也要用同一套 */
 
 /* ==========================================================================
    健康评分

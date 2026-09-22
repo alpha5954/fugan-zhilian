@@ -58,12 +58,8 @@ import type { RehabSession } from '@/types'
 /** 趋势方向。只有三档 —— 家属读不出"斜率 2.3°/周" */
 export type TrendDirection = 'up' | 'flat' | 'down'
 
-export interface TrendItem {
-  exercise: string
-  /** 判定用的是哪个量 */
-  metric: AssessMetric
-  /** 该量的中文名。动态动作是「关节活动度」，静力动作是「保持角度」 */
-  metricName: string
+/** 方向判定。**天数够的时候才有** —— 见 TrendItem.trend */
+export interface TrendDirectionInfo {
   direction: TrendDirection
   /** 前半段的平均 */
   before: number
@@ -73,11 +69,19 @@ export interface TrendItem {
   delta: number
   /** 达到多少才算"有变化"。按目标的比例算，见 scoreConfig */
   threshold: number
+}
+
+export interface TrendItem {
+  exercise: string
+  /** 判定用的是哪个量 */
+  metric: AssessMetric
+  /** 该量的中文名。动态动作是「关节活动度」，静力动作是「保持角度」 */
+  metricName: string
   /** 该动作的康复目标 */
   target: number
-  /** 最近一次记录的值 */
+  /** 最近一天的值 */
   latest: number
-  /** 最近一次是否达标 */
+  /** 最近一天是否达标 */
   onTarget: boolean
   /**
    * 这一行该显示的灯。
@@ -86,8 +90,24 @@ export interface TrendItem {
    * "逐动作那一行是黄的、下面那条结论是红的"。等级规则只留一处。
    */
   band: RiskBand
-  /** 参与判定的记录条数 */
+  /** 参与统计的天数 */
   points: number
+  /**
+   * 方向。**可能是 null**。
+   *
+   * 【为什么可空，而不是没方向就整条不出现】
+   * "在往哪个方向走"和"现在达没达标"是**两件事**：
+   *
+   *   方向  需要 ≥ TREND_MIN_POINTS 天，两三个点连不出趋势
+   *   达标  一次训练就能回答
+   *
+   * 原先天数不够时整条丢掉，于是一个刚练了三天、或者选了「近 7 天」
+   * 的用户，界面上**一个动作都不显示** —— 连"哪个达标了"都看不到。
+   * 而那是数据完全支持回答的问题。
+   *
+   * 现在分开：方向答不了就明说答不了，达标该给照给。
+   */
+  trend: TrendDirectionInfo | null
 }
 
 export interface TrendReport {
@@ -99,7 +119,13 @@ export interface TrendReport {
   items: TrendItem[]
   /** 需要注意 + 建议。与评估页同一套结构 */
   findings: Finding[]
-  /** 数据量够不够做趋势判断。不够时 items 为空 */
+  /**
+   * 有没有至少一个动作的方向是能判的。
+   *
+   * ⚠️ 与 `items.length > 0` **不是一回事** —— items 里也包含那些
+   * "记录太少、只有达标状态、没有方向"的动作。判断"能不能谈趋势"
+   * 要看这个字段，判断"有没有东西可显示"看 items。
+   */
   hasEnoughData: boolean
   /** 窗口是不是短到趋势不可信（见 scoreConfig 的 SHORT_WINDOW_DAYS） */
   shortWindow: boolean
@@ -199,42 +225,48 @@ function trendOfExercise(
     else byDay.set(key, [v])
   }
 
-  if (byDay.size < TREND_MIN_POINTS) return null
+  // 一点数据都没有就真的没什么可说 —— 这个动作在窗口内没出现过
+  if (!byDay.size) return null
 
   // 按日期升序取点。日期键是 YYYY-MM-DD，字典序就是时间序
   const days = [...byDay.keys()].sort()
   const points = days.map((d) => mean(byDay.get(d)!))
 
-  const half = Math.floor(points.length / 2)
-  const before = mean(points.slice(0, half))
-  const after = mean(points.slice(half))
-  const delta = after - before
-  const threshold = thresholdFor(exercise)
-
-  const direction: TrendDirection =
-    delta > threshold ? 'up' : delta < -threshold ? 'down' : 'flat'
-
-  // 最近一次的值取**最新那天**的均值，不是全窗口的 mean ——
-  // "现在能不能达标"问的是最近的状态，不是历史平均
+  // 最近一天的值，不是全窗口的 mean —— "现在能不能达标"问的是最近的状态，
+  // 不是历史平均。这一项**一天记录就成立**，所以放在天数门槛之前算
   const latest = points[points.length - 1]!
-
   const target = targetFor(exercise)
   const onTarget = latest >= target
+
+  // ⚠️ 天数不够时给 trend: null 而不是整条丢掉。
+  //    "方向"答不了，"现在达没达标"照答 —— 见 TrendItem.trend 的注释
+  let trend: TrendDirectionInfo | null = null
+  if (byDay.size >= TREND_MIN_POINTS) {
+    const half = Math.floor(points.length / 2)
+    const before = mean(points.slice(0, half))
+    const after = mean(points.slice(half))
+    const delta = after - before
+    const threshold = thresholdFor(exercise)
+
+    trend = {
+      direction: delta > threshold ? 'up' : delta < -threshold ? 'down' : 'flat',
+      before,
+      after,
+      delta,
+      threshold,
+    }
+  }
 
   return {
     exercise,
     metric: metricFor(exercise),
     metricName: metricLabel(metricFor(exercise)),
-    direction,
-    before,
-    after,
-    delta,
-    threshold,
     target,
     latest,
     onTarget,
-    band: bandOfTrend(direction, onTarget, latest, target),
+    band: bandOfItem(trend, onTarget, latest, target),
     points: byDay.size,
+    trend,
   }
 }
 
@@ -246,15 +278,16 @@ function trendOfExercise(
  * 两处规则必须一致，否则同一件事在逐动作列表里和在结论列表里
  * 会显示成两个等级。
  */
-function bandOfTrend(
-  direction: TrendDirection,
+function bandOfItem(
+  trend: TrendDirectionInfo | null,
   onTarget: boolean,
   latest: number,
   target: number,
 ): RiskBand {
   // 在回落：达标了也要留意，没达标就是要处理
-  if (direction === 'down') return onTarget ? 'yellow' : 'red'
+  if (trend?.direction === 'down') return onTarget ? 'yellow' : 'red'
   if (onTarget) return 'green'
+  // 没达标。方向未知时按"差多少"判 —— 那件事不需要趋势也看得清
   const shortfall = target > 0 ? (target - latest) / target : 0
   return shortfall > SHORTFALL_CRITICAL ? 'red' : 'yellow'
 }
@@ -265,14 +298,17 @@ function bandOfTrend(
  * 排序：先看达标情况（没达标的排前面），再看方向（下降 > 持平 > 上升）。
  * 家属打开这一页最先要看到的是"哪个还没做好"，不是"哪个做得最好"。
  */
-function directionRank(d: TrendDirection): number {
-  return d === 'down' ? 0 : d === 'flat' ? 1 : 2
+function directionRank(t: TrendDirection | null): number {
+  if (t === 'down') return 0
+  // 方向和"持平"一起排：判不出来不等于更紧急
+  if (t === null || t === 'flat') return 1
+  return 2
 }
 
 function sortItems(items: TrendItem[]): TrendItem[] {
   return [...items].sort((a, b) => {
     if (a.onTarget !== b.onTarget) return a.onTarget ? 1 : -1
-    return directionRank(a.direction) - directionRank(b.direction)
+    return directionRank(a.trend?.direction ?? null) - directionRank(b.trend?.direction ?? null)
   })
 }
 
@@ -328,11 +364,13 @@ function buildFindings(
   // -------------------------------------------------------------------------
   // "没达标"和"没达标而且一直没变化"是两回事。后者才是真正需要换做法的，
   // 而另外两页都说不出来（首页只看本周，评估页只看单次）。
-  const stuck = items.filter((it) => !it.onTarget && it.direction !== 'up')
+  const stuck = items.filter(
+    (it) => !it.onTarget && it.trend && it.trend.direction !== 'up',
+  )
   for (const it of stuck) {
     const gap = it.target - it.latest
     const shortfall = it.target > 0 ? gap / it.target : 0
-    const flat = it.direction === 'flat'
+    const flat = it.trend!.direction === 'flat'
 
     out.push({
       key: 'trend_stuck',
@@ -342,8 +380,8 @@ function buildFindings(
       // 差得少（三成以内）算"需要注意"，差得多算"需要处理"
       band: shortfall > 0.3 ? 'red' : 'yellow',
       evidence:
-        `${it.points} 天记录，${it.metricName}由 ${it.before.toFixed(1)}° ` +
-        `${flat ? '维持' : '降至'} ${it.after.toFixed(1)}°；` +
+        `${it.points} 天记录，${it.metricName}由 ${it.trend!.before.toFixed(1)}° ` +
+        `${flat ? '维持' : '降至'} ${it.trend!.after.toFixed(1)}°；` +
         `最近一次 ${it.latest.toFixed(1)}°，目标 ${it.target}°，差 ${gap.toFixed(1)}°`,
       action:
         it.metric === 'hold'
@@ -354,19 +392,47 @@ function buildFindings(
   }
 
   // -------------------------------------------------------------------------
+  // 2b. 记录太少、判不出方向，但最近一次没达标
+  // -------------------------------------------------------------------------
+  // 和上面那条分开：那条说的是"一直没变化"（我们确实看出来了），
+  // 这条说的是"看不出来，而且现在也没达标"。**不能混** ——
+  // 用"没有明显变化"去描述一个只有两天记录的动作，是编结论。
+  const unknown = items.filter((it) => !it.onTarget && !it.trend)
+  if (unknown.length) {
+    out.push({
+      key: 'trend_insufficient',
+      label:
+        unknown.map((it) => `「${it.exercise}」`).join('') +
+        `记录还太少，看不出变化，且最近一次未达目标`,
+      band: 'yellow',
+      evidence: unknown
+        .map(
+          (it) =>
+            `${it.exercise} 最近 ${it.latest.toFixed(1)}° / 目标 ${it.target}°` +
+            `（仅 ${it.points} 天记录）`,
+        )
+        .join('；'),
+      action: `多练几次再回这一页看趋势；单次未达标很常见，先按方案继续`,
+      priority: 30,
+    })
+  }
+
+  // -------------------------------------------------------------------------
   // 3. 整体回落
   // -------------------------------------------------------------------------
   // 上面那条只管"未达标且没在好"。这一条管"本来达标了，最近在退"——
   // 那比一直没达标更值得警觉
-  const falling = items.filter((it) => it.direction === 'down' && it.onTarget)
+  const falling = items.filter(
+    (it) => it.trend?.direction === 'down' && it.onTarget,
+  )
   for (const it of falling) {
     out.push({
       key: 'trend_down',
       label: `「${it.exercise}」近期较前期有所回落`,
       band: 'yellow',
       evidence:
-        `${it.metricName}由 ${it.before.toFixed(1)}° 降至 ${it.after.toFixed(1)}°` +
-        `（${Math.abs(it.delta).toFixed(1)}°），目前 ${it.latest.toFixed(1)}° 仍在目标 ${it.target}° 以上`,
+        `${it.metricName}由 ${it.trend!.before.toFixed(1)}° 降至 ${it.trend!.after.toFixed(1)}°` +
+        `（${Math.abs(it.trend!.delta).toFixed(1)}°），目前 ${it.latest.toFixed(1)}° 仍在目标 ${it.target}° 以上`,
       action: '先看是否与当天的状态、疼痛或疲劳有关；连续几次都低再联系治疗师',
       priority: 40,
     })
@@ -414,10 +480,10 @@ function buildFindings(
   // -------------------------------------------------------------------------
   // 只报问题的话，一个恢复得很好的患者打开这一页会看到"没有任何结论"，
   // 那比说一句"在稳定改善"更让人不安
-  const rising = items.filter((it) => it.direction === 'up')
+  const rising = items.filter((it) => it.trend?.direction === 'up')
   if (rising.length) {
     const names = rising.map((it) => `「${it.exercise}」`).join('')
-    const total = rising.reduce((s, it) => s + it.delta, 0)
+    const total = rising.reduce((s, it) => s + it.trend!.delta, 0)
     out.push({
       key: 'trend_up',
       label: `${names}${windowLabel}在稳定改善`,
@@ -425,19 +491,22 @@ function buildFindings(
       evidence: rising
         .map(
           (it) =>
-            `${it.exercise} ${it.before.toFixed(1)}° → ${it.after.toFixed(1)}°`,
+            `${it.exercise} ${it.trend!.before.toFixed(1)}° → ${it.trend!.after.toFixed(1)}°`,
         )
         .join('；') + `，合计提升 ${total.toFixed(1)}°`,
       action: '保持当前训练方案',
       priority: 90,
     })
-  } else if (items.length && items.every((it) => it.direction === 'flat')) {
+  } else if (
+    items.length &&
+    items.every((it) => it.trend?.direction === 'flat')
+  ) {
     out.push({
       key: 'trend_flat_all',
       label: `${windowLabel}各动作基本持平`,
       band: 'green',
       evidence: items
-        .map((it) => `${it.exercise} ${it.after.toFixed(1)}°（目标 ${it.target}°）`)
+        .map((it) => `${it.exercise} ${it.trend!.after.toFixed(1)}°（目标 ${it.target}°）`)
         .join('；'),
       action: '康复有平台期是正常的，按当前方案继续',
       priority: 100,
@@ -497,10 +566,24 @@ function headlineFor(
     )
   }
 
-  const rising = items.filter((it) => it.direction === 'up').length
-  const falling = items.filter((it) => it.direction === 'down').length
-  const stuck = items.filter((it) => !it.onTarget && it.direction !== 'up').length
+  const judged = items.filter((it) => it.trend !== null)
   const onTarget = items.filter((it) => it.onTarget).length
+
+  // 一个动作的方向都判不出来 —— 说清"方向看不出"，但把**能答的答掉**。
+  // 只说"看不出趋势"就停住是不对的：这一次达没达标，数据是支持回答的
+  if (!judged.length) {
+    return (
+      `${windowLabel}共 ${n} 次训练、覆盖 ${days} 天；` +
+      `单个动作的记录都不到 ${TREND_MIN_POINTS} 天，看不出方向，` +
+      `其中 ${onTarget}/${items.length} 个动作最近一次达到目标`
+    )
+  }
+
+  const rising = judged.filter((it) => it.trend!.direction === 'up').length
+  const falling = judged.filter((it) => it.trend!.direction === 'down').length
+  const stuck = judged.filter(
+    (it) => !it.onTarget && it.trend!.direction !== 'up',
+  ).length
 
   const parts: string[] = []
   if (rising) parts.push(`${rising} 个动作在改善`)
@@ -511,7 +594,12 @@ function headlineFor(
     ? parts.join('，')
     : `${onTarget} 个动作达到目标，其余基本持平`
 
-  return `${windowLabel}共 ${n} 次训练、覆盖 ${days} 天：${summary}`
+  // 有动作因为记录太少而没参与方向判断，要说出来 ——
+  // 不说的话"4 个动作在改善"会被当成全部动作的情况
+  const skipped = items.length - judged.length
+  const tail = skipped ? `（另有 ${skipped} 个动作记录太少，看不出方向）` : ''
+
+  return `${windowLabel}共 ${n} 次训练、覆盖 ${days} 天：${summary}${tail}`
 }
 
 // ---------------------------------------------------------------------------
@@ -549,7 +637,7 @@ export function buildTrendReport(
     headline: headlineFor(items, sessions, windowLabel),
     items,
     findings: buildFindings(items, sessions, windowLabel, now),
-    hasEnoughData: items.length > 0,
+    hasEnoughData: items.some((it) => it.trend !== null),
     shortWindow: opts.days > 0 && opts.days < SHORT_WINDOW_DAYS,
     sessionCount: sessions.length,
     activeDays: new Set(sessions.map(dateKey)).size,

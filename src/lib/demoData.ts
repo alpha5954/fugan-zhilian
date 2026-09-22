@@ -158,3 +158,31 @@ export function buildDemoAlerts(now: Date = new Date()): Alert[] {
     },
   ]
 }
+
+// ---------------------------------------------------------------------------
+// 缓存访问器
+// ---------------------------------------------------------------------------
+
+/**
+ * 演示记录，**按当天缓存**。多个页面共用这一份。
+ *
+ * 【为什么要缓存】
+ * generateSession 每次都要跑一遍信号模拟，而首页和分析页都要用它。
+ * 不缓存的话每页各算一遍。
+ *
+ * 【为什么缓存键里带日期，而不是简单存一个变量】
+ * 结果是**依赖"今天"**的（记录都挂在最近 21 天里）。存一个裸变量的话，
+ * 一个跨了午夜的会话会一直拿着昨天算的那份 —— 记录里会出现"两天前"
+ * 这种过期的相对时间。带日期键就没有这个问题。
+ *
+ * 【不需要担心两页数据对不上】
+ * 随机源是固定种子的（见 rng.ts 的 DEMO_SEED），每次调用结果完全一样。
+ * 缓存只是省算力，不承担"让两页一致"的职责。
+ */
+let cached: { key: string; rows: RehabSession[] } | null = null
+
+export function demoSessions(now: Date = new Date()): RehabSession[] {
+  const key = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`
+  if (cached?.key !== key) cached = { key, rows: buildDemoSessions(now) }
+  return cached.rows
+}

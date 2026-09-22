@@ -9,6 +9,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 
 import BarChart from '@/components/BarChart.vue'
 import type { BarSeries } from '@/components/BarChart.vue'
+import DemoNotice from '@/components/DemoNotice.vue'
 import FindingCard from '@/components/FindingCard.vue'
 import PieChart from '@/components/PieChart.vue'
 import RiskBadge from '@/components/RiskBadge.vue'
@@ -25,6 +26,7 @@ import {
 } from '@/lib/analysis'
 import { REHAB_EXERCISES } from '@/lib/assessment'
 import { seriesColor } from '@/lib/chartTheme'
+import { demoSessions } from '@/lib/demoData'
 import { formatDateTime } from '@/lib/format'
 import { TOP_FINDINGS } from '@/lib/scoreConfig'
 import { useCareStore } from '@/stores/care'
@@ -81,6 +83,8 @@ async function load() {
       patientId: care.activePatientId,
       limit: 500,
     })
+    // 见过真实记录就不再回退到演示数据。只增不减
+    if (sessions.sessions.length) everHadData.value = true
   } finally {
     loading.value = false
   }
@@ -97,10 +101,48 @@ function onFilterChange() {
 // ---------------------------------------------------------------------------
 // 数据（在 store 数据之上再做一层动作筛选）
 // ---------------------------------------------------------------------------
+
+/**
+ * 该展示演示数据吗。
+ *
+ * 【为什么分析页也需要它】
+ * 首页早就有了。首次打开链接的人（评审、家属、队友）一定没有历史记录，
+ * 而这一页的价值完全建立在历史上 —— 没有记录就只剩一句"所选范围内还没有
+ * 训练记录"，四张图和结论区**一个都不出现**。让评审看到一片空白，
+ * 等于这套东西没做。
+ *
+ * ⚠️ 判据是"**这个患者从来没有过记录**"，不是"当前窗口内没有记录"。
+ *    后者会让一个真实用户选了「近 7 天」而恰好那周没练时，看到一组别人的
+ *    数据 —— 就算标了"演示数据"，也足以让人误会。所以用一个只增不减的
+ *    标记，见过一次真实记录就永远不再回退。
+ */
+const everHadData = ref(false)
+const usingDemo = computed(
+  () => !loading.value && !sessions.error && !everHadData.value,
+)
+
+/**
+ * 这一页实际基于的记录：真实的，或演示的。
+ *
+ * ⚠️ 演示记录**必须自己按窗口筛一遍**。
+ *    真实数据是 `sessions.fetch({ from })` 带回来的，时间范围在请求里就
+ *    已经过滤掉了；而演示数据是内存里造的，没经过那道。不筛的话选了
+ *    「近 7 天」还会显示 21 天的记录 —— 界面上的窗口标签就成了假的，
+ *    而这一页的结论**全都带窗口**（"近 7 天共…"），标签一假，整段结论
+ *    都在描述一个不是用户所选的范围。
+ */
+const source = computed(() => {
+  if (!usingDemo.value) return sessions.sessions
+  const rows = demoSessions()
+  const { from } = rangeFromDays(rangeDays.value)
+  if (!from) return rows
+  return rows.filter((s) => new Date(s.started_at) >= from)
+})
+
 const filtered = computed(() =>
   exerciseFilter.value
-    ? sessions.sessions.filter((s) => s.exercise === exerciseFilter.value)
-    : sessions.sessions,
+    ? source.value.filter((s) => s.exercise === exerciseFilter.value)
+    : source.value,
 )
 
 const summary = computed(() => summarize(filtered.value))
@@ -283,6 +325,14 @@ onMounted(load)
       empty-text="所选范围内还没有训练记录。去「康复评估」记录一次训练，或放宽筛选范围。"
       @retry="load"
     >
+      <!-- 演示数据声明。与首页共用同一个组件和同一句话的壳子 ——
+           两页各写一份的话，改了一处另一处不变，同一个访客会在两个页面上
+           看到对"演示数据"的两种不同说明 -->
+      <DemoNotice v-if="usingDemo">
+        您还没有训练记录，下面用一组示例数据展示这一页能给出什么样的结论。
+        去「康复评估」记录一次训练后，这里会自动换成您自己的数据。
+      </DemoNotice>
+
       <!-- ================= 结论 =================
            放在概要条和图表**之前**：先结论、后依据、再明细。
            这是「康复评估」页那次教训的直接应用 —— 那一页的结论原先排在
@@ -316,12 +366,20 @@ onMounted(load)
           >
             <RiskBadge :band="it.band" dot size="sm" />
             <span class="trendlist__name">{{ it.exercise }}</span>
-            <span class="trendlist__dir">{{ DIRECTION_LABEL[it.direction] }}</span>
+
+            <!-- 方向判不出来就说判不出来，不编一个"持平"。
+                 但"最近一次达没达标"照给 —— 那件事一次训练就能回答 -->
+            <span class="trendlist__dir" :class="{ 'trendlist__dir--none': !it.trend }">
+              {{ it.trend ? DIRECTION_LABEL[it.trend.direction] : '看不出方向' }}
+            </span>
             <span class="trendlist__nums">
-              {{ it.before.toFixed(1) }}° → {{ it.after.toFixed(1) }}°
+              <template v-if="it.trend">
+                {{ it.trend.before.toFixed(1) }}° → {{ it.trend.after.toFixed(1) }}°
+              </template>
+              <template v-else>最近 {{ it.latest.toFixed(1) }}°</template>
             </span>
             <span class="trendlist__meta">
-              {{ it.metricName }} · 目标 {{ it.target }}° · {{ it.points }} 天
+              {{ it.metricName }} · 目标 {{ it.target }}° · {{ it.points }} 天记录
             </span>
           </li>
         </ul>
@@ -673,6 +731,11 @@ onMounted(load)
 
 .trendlist__dir {
   color: var(--ink-600);
+}
+
+/* 看不出方向：弱化，别让它看起来像一种判断 */
+.trendlist__dir--none {
+  color: var(--ink-300);
 }
 
 .trendlist__nums {

@@ -89,6 +89,7 @@ export type FindingKey =
   // ---- 分析页：一段时间内的趋势 ----
   | 'trend_temp_over'
   | 'trend_stuck'
+  | 'trend_insufficient'
   | 'trend_down'
   | 'trend_low_adherence'
   | 'trend_low_confidence'
