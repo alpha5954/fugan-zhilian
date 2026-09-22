@@ -156,7 +156,13 @@ Redirect URLs 加上线上地址与本地开发地址，Site URL 指向线上地
 
 GitHub Pages 是静态托管，**不支持 SPA 回退**：直接访问 `/fugan-zhilian/analysis` 或在深链接上刷新，会因为找不到同名文件而返回 404。
 
-构建流程里加了一步把 `index.html` 复制成 `404.html`。Pages 遇到未知路径时会用这个页面兜底，应用照常启动，vue-router 按 `location.pathname` 解析出正确路由。
+**部署流程**里加了一步把 `index.html` 复制成 `404.html`（在
+`.github/workflows/deploy.yml` 里，**不在 `npm run build` 里**）。Pages 遇到未知路径时
+会用这个页面兜底，应用照常启动，vue-router 按 `location.pathname` 解析出正确路由。
+
+> ⚠️ 别在本地找 `dist/404.html` —— `npm run build` 只跑 `vue-tsc && vite build`，
+> **不产出它**。这一句原先写的是"构建流程里加了一步"，读起来像是本地构建的事。
+> 本地看深链接路由靠 `vite preview` 自带的 SPA 回退，和这个 404.html 是两回事。
 
 > 副作用：深链接返回的 HTTP 状态码是 404 而非 200。对演示无影响，但如果将来要做 SEO，需要改用 hash 路由或换支持 SPA 回退的托管（Vercel / Netlify）。
 
@@ -901,9 +907,26 @@ connectNulls: false    线段需要两个相邻非空点才画得出来
 
 | | 做法 |
 |---|---|
-| 路由切换 | `mode="out-in"`，出 80ms / 入 160ms。不加 out-in 的话新旧两页会同时在文档流里，高度会跳一下 |
+| 路由切换 | ⚠️ **目前没有实际效果，见下** |
 | 评分数字 | `composables/useCountUp.ts`。**首次直接落位、只在值变化时滚** —— 从 0 滚到 85 会读成"分数从 0 涨上来了" |
 | 图表 | 入场 420ms、**更新 260ms**。更新必须快，否则每次改筛选条件都要等它"演"一遍 |
+
+> ⚠️ **路由切换的淡入没实现，这一格原先写的是"出 80ms / 入 160ms"。**
+>
+> `DefaultLayout.vue` 里有 `<Transition name="page" mode="out-in">`，但**全项目没有
+> 一行 `.page-enter-active` 之类的样式** —— `git log -S ".page-enter-active"` 为空，
+> 说明这套类名**从来没被写过**。没有 CSS 时 Vue 判定"无过渡"，`mode="out-in"`
+> 只让新旧两页依次挂载，视觉上是瞬时切换。
+>
+> 同一个提交里 `DefaultLayout.vue` 的注释却写着"用 mode="out-in" 且时长压得很短
+> （出 80ms / 入 160ms）…总耗时 240ms 已经足够顺"——**注释描述了没写的代码**。
+> README 又把它抄了一遍，于是两份文档互相背书一个不存在的功能。
+>
+> 这正好是这个项目自己反复警告过的那类问题。`Dashboard.vue` 折叠区里留过一条
+> 同类记录：**写字面承诺之前先确认实现了没有。**
+>
+> **待定**：要么补上那 12 行 CSS（注释里的设计意图是成立的 —— out-in 避免高度跳、
+> 240ms 够"顺"），要么把 `<Transition>` 和注释一起删掉。**没有替谁做决定。**
 
 ⚠️ `useCountUp` **必须自己判断 `prefers-reduced-motion`**。`style.css` 里那条全局
 媒体查询只管得到 CSS 动画，`requestAnimationFrame` 它管不着。前庭功能障碍的人
