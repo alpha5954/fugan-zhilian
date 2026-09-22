@@ -38,6 +38,7 @@ import {
   SAFETY_PENALTY,
   SCORE_LEVELS,
   STABILITY_CV_LIMIT,
+  STABILITY_CONCERN_SCORE,
   STABILITY_FAIR_CV,
   STABILITY_GOOD_CV,
   STABILITY_NEUTRAL,
@@ -112,6 +113,22 @@ export interface ScorePart {
   weight: number
   /** 一句话依据。展开"为什么是这个分"时显示 */
   detail: string
+  /**
+   * 这一项**查到的具体短板**，供建议直接引用。
+   *
+   * 【为什么要有这个字段】
+   * 建议原先是拿四个分量的**分值**比大小，挑最低的那个说。但四个分量的
+   * "正常水平"根本不同：训练坚持要么够要么不够、动作达标通常接近满分、
+   * 而动作稳定天然带波动，89 分是常态而不是问题。
+   *
+   * 实测后果（demo 数据）：稳定 89 分被挑中，建议说「把动作放慢一些」；
+   * 而同一份数据里真正该说的是「坐位伸膝差 8°」—— 这件事
+   * 「动作达标」那一项**已经算出来了**（见 weakestExercise），
+   * 只是分值 99 让它排不到前面，于是证据被丢掉、结论指错了方向。
+   *
+   * 现在把短板原样带出来，建议就能直接指名道姓。
+   */
+  weakest?: { exercise: string; actual: number; target: number }
 }
 
 /** 首页那三张家属语言卡片 */
@@ -125,6 +142,21 @@ export interface SummaryCard {
   /** 补充说明，可以是空的 */
   detail: string
   band: RiskBand
+}
+
+/**
+ * 一次评分调整。
+ *
+ * 带 `delta` 是为了让界面能说清"掉了多少分"。原来只有一句话
+ * （"评分已下调"）加一个调整前的分数，家属要自己减 —— 实测 demo 的
+ * 情况是 raw 94 → score 80，**中间跨了一个档位**（≥90 是"优秀"、
+ * ≥80 是"良好"），展开详情看到 94 的人会问"那我到底是多少分"。
+ */
+export interface ScoreAdjustment {
+  /** 家属语言，说明为什么调整 */
+  text: string
+  /** 这一步让分数变化了多少。负数表示下调 */
+  delta: number
 }
 
 export interface Insight {
@@ -144,9 +176,9 @@ export interface Insight {
    * 分数经过了哪些调整。
    *
    * 空数组表示没调整过。有内容时必须展示出来 —— 悄悄改分而不说明
-   * 是这个界面最不能做的事。
+   * 是这个界面最不能做的事。每一项都带 delta，界面要说清掉了多少分。
    */
-  adjustments: string[]
+  adjustments: ScoreAdjustment[]
   /**
    * 风险等级。由「预警事件」与「评分」合成，用于卡片与提示条。
    *
@@ -185,8 +217,25 @@ export interface Insight {
 
 /** 一次训练相对它的目标完成了多少 */
 interface Completion {
-  /** 0~1 的完成度，已封顶 */
+  /** 0~1 的完成度，**已封顶**。用于"动作达标" */
   ratio: number
+  /**
+   * 未封顶的完成度。达标时大于 1。
+   *
+   * 【为什么必须留着它】
+   * 封顶会让"达标之后继续变好"在数学上消失。实测过：固定基线 90°，
+   * 本周分别做到 90° / 95° / 120° / 140°，**四种情况得到完全相同的
+   * 得分和完全相同的一句"基本持平"** —— 因为两边都被读成 1.0，
+   * 变化率恒为 0。
+   *
+   * 而康复中后期的主要目标恰恰就是"达标之后继续改善"，
+   * 那段时间里 30% 的权重等于不存在。
+   *
+   * 所以两个口径分开：
+   *   算**达标度**用 ratio   —— 达标就是达标，多做不该补别的短板
+   *   算**变化趋势**用 raw   —— 变没变好必须看得见
+   */
+  raw: number
   /** 判定用的实测值（动态动作是活动范围，静力动作是保持角度） */
   actual: number
   /** 判定用的是哪个量 */
@@ -225,17 +274,27 @@ function completionOf(session: RehabSession): Completion | null {
   if (metric === 'hold') {
     const h = session.hold_deg
     if (typeof h !== 'number') return null
-    return { ratio: clamp01(h / target), actual: h, metric, target }
+    return { ratio: clamp01(h / target), raw: h / target, actual: h, metric, target }
   }
 
   const rom = session.rom_deg
   if (typeof rom !== 'number') return null
-  return { ratio: clamp01(rom / target), actual: rom, metric, target }
+  return { ratio: clamp01(rom / target), raw: rom / target, actual: rom, metric, target }
 }
 
-/** 取完成度，只要比值。绝大多数地方只关心这个 */
+/** 取完成度，只要封顶后的比值。用于达标度 */
 function ratioOf(session: RehabSession): number | null {
   return completionOf(session)?.ratio ?? null
+}
+
+/**
+ * 取**未封顶**的完成度。用于一切"和以前比"的计算。
+ *
+ * 进步度和稳定性都必须用它，理由见 Completion.raw 的注释 ——
+ * 用封顶值的话，达标之后的变化会被抹平。
+ */
+function rawRatioOf(session: RehabSession): number | null {
+  return completionOf(session)?.raw ?? null
 }
 
 // ---------------------------------------------------------------------------
@@ -274,27 +333,43 @@ function targetPart(input: PartInput): ScorePart {
     weight: WEIGHTS.target,
     detail: worst
       ? `本周达到康复目标的 ${pct}%，其中「${worst.exercise}」差距最大` +
-        `（${Math.round(worst.actual)}° / 目标 ${worst.target}°）`
+        `（${Math.round(worst.actual)}° / 目标 ${worst.target}°，` +
+        `差 ${Math.round(worst.target - worst.actual)}°）`
       : `本周达到康复目标的 ${pct}%`,
+    ...(worst ? { weakest: worst } : {}),
   }
 }
 
-/** 本周完成度最低的动作 */
+/**
+ * 本周**未达标**里差距最大的那个动作。全都达标时返回 null。
+ *
+ * 【为什么必须排除已达标的】
+ * 原先是拿所有动作比大小，封顶之后所有达标的比值都是 1.0，
+ * `<` 比较会**随便挑一个**。实测挑出过这样的句子：
+ *
+ *     本周达到康复目标的 100%，其中「屈膝滑动」差距最大（120° / 目标 90°）
+ *
+ * 120° 比目标高 33%，被称为"差距最大"。答辩时被问到这句很难解释。
+ *
+ * 没有差距的时候就不该说"差距最大" —— 返回 null，让上面少说一句。
+ */
 function weakestExercise(
   week: RehabSession[],
 ): { exercise: string; actual: number; target: number } | null {
-  let worst: { exercise: string; actual: number; target: number; ratio: number } | null =
+  let worst: { exercise: string; actual: number; target: number; raw: number } | null =
     null
 
   for (const c of week) {
     const done = completionOf(c)
     if (!done) continue
-    if (!worst || done.ratio < worst.ratio) {
+    // 达标的（含刚好达标）不参与"差距最大"的评选
+    if (done.actual >= done.target) continue
+    if (!worst || done.raw < worst.raw) {
       worst = {
         exercise: c.exercise,
         actual: done.actual,
         target: done.target,
-        ratio: done.ratio,
+        raw: done.raw,
       }
     }
   }
@@ -305,8 +380,11 @@ function weakestExercise(
 }
 
 function progressPart(input: PartInput): ScorePart {
-  const weekRatios = input.week.map(ratioOf).filter((r): r is number => r !== null)
-  const baseRatios = input.baseline.map(ratioOf).filter((r): r is number => r !== null)
+  // ⚠️ 这里用**未封顶**的完成度。用封顶值的话，一个已经达标的患者
+  //    无论继续进步多少，两边都读成 1.0，变化率恒为 0 —— 这一项
+  //    对他永久失效。见 Completion.raw 的注释。
+  const weekRatios = input.week.map(rawRatioOf).filter((r): r is number => r !== null)
+  const baseRatios = input.baseline.map(rawRatioOf).filter((r): r is number => r !== null)
 
   const hasBaseline = input.baseline.length >= MIN_BASELINE_SESSIONS
 
@@ -347,10 +425,50 @@ function progressPart(input: PartInput): ScorePart {
   }
 }
 
-function stabilityPart(input: PartInput): ScorePart {
-  const ratios = input.week.map(ratioOf).filter((r): r is number => r !== null)
+/** 变异系数：标准差 ÷ 均值。看不见波动时返回 0 */
+function cvOf(xs: number[]): number {
+  if (xs.length < 2) return 0
+  const m = mean(xs)
+  return m > 0 ? stdDev(xs) / m : 0
+}
 
-  if (ratios.length < 2) {
+/**
+ * 动作稳定 —— 同一个动作**每次做得一不一样**。
+ *
+ * 【为什么必须按动作分组】
+ * 原先把一周里所有动作的完成度混在一起算变异系数。但那样算出来的
+ * 量的是**动作之间**的差异，不是动作内部的波动 —— 两件完全不同的事。
+ *
+ * 实测对照（同一台机器、同一组构造）：
+ *
+ *   同一动作 6 次完全一致（零抖动）+ 一次坐位伸膝 72°  → 稳定 **88**
+ *   同一动作抖动 88~98（±5%），无跨动作               → 稳定 **97**
+ *
+ * **零抖动的那一组分数反而更低。** 因为它其实在测"你有个动作没达标"，
+ * 而这件事已经由「动作达标」那一项说了，在这里再说一遍是重复计分。
+ *
+ * 【为什么用未封顶的完成度】
+ * 封顶会把接近满分时的波动压平 —— 一个在 130°~140° 之间波动的患者
+ * 曾经因为全部封顶到 1.0 而显示"发挥稳定"。天花板不该制造稳定性。
+ *
+ * 【怎么加权】
+ * 按每个动作的会话数加权：练了 5 次的动作比只练 1 次的动作更能说明
+ * 这个人的稳定性，而只有 ≥2 次的动作才估得出组内波动。
+ */
+function stabilityPart(input: PartInput): ScorePart {
+  const groups = new Map<string, number[]>()
+  for (const s of input.week) {
+    const done = completionOf(s)
+    if (!done) continue
+    const arr = groups.get(s.exercise) ?? []
+    arr.push(done.raw)
+    groups.set(s.exercise, arr)
+  }
+
+  // 只有练过两次以上的动作才能估波动。全都只练了一次就无从谈起
+  const usable = [...groups.values()].filter((a) => a.length >= 2)
+
+  if (!usable.length) {
     return {
       key: 'stability',
       label: '动作稳定',
@@ -360,16 +478,13 @@ function stabilityPart(input: PartInput): ScorePart {
     }
   }
 
-  const m = mean(ratios)
-  // 变异系数：标准差 ÷ 均值。用它而不是光看标准差，是因为
-  // 不同动作的完成度尺度不同，只有相对波动才可比。
-  //
-  // ⚠️ 这一项有个已知的失真：完成度被 clamp 到 [0,1]，接近满分时
-  //    天花板会把波动压小，于是"做得很好"看起来比"做得中等"更稳定。
-  //    彻底解决要改用未封顶的原始角度算波动，留给后面的迭代。
-  const cv = m > 0 ? stdDev(ratios) / m : 0
+  const total = usable.reduce((sum, a) => sum + a.length, 0)
+  const cv = usable.reduce((sum, a) => sum + cvOf(a) * a.length, 0) / total
 
   const value = clamp01(1 - cv / STABILITY_CV_LIMIT)
+  // 挑波动最大的那个动作说。具体到动作名，患者才知道该盯哪一个
+  const jumpiest = usable.reduce((a, b) => (cvOf(b) > cvOf(a) ? b : a))
+  const jumpiestCv = cvOf(jumpiest)
 
   return {
     key: 'stability',
@@ -381,7 +496,8 @@ function stabilityPart(input: PartInput): ScorePart {
         ? '每次动作幅度都很接近，发挥稳定'
         : cv < STABILITY_FAIR_CV
           ? '动作幅度偶有起伏，总体可控'
-          : '动作幅度忽大忽小，建议放慢速度、组间多休息',
+          : `动作幅度忽大忽小（${Math.round(jumpiestCv * 100)}% 的波动），` +
+            '建议放慢速度、组间多休息',
   }
 }
 
@@ -469,29 +585,34 @@ function adjustScore(
   rawScore: number,
   weekSessions: number,
   weekAlerts: Alert[],
-): { score: number; adjustments: string[] } {
-  const adjustments: string[] = []
+): { score: number; adjustments: ScoreAdjustment[] } {
+  const adjustments: ScoreAdjustment[] = []
+  const before = Math.round(rawScore)
   let score = rawScore
 
   // ① 数据充分度
   const sufficiency = clamp01(weekSessions / SUFFICIENT_SESSIONS)
   if (sufficiency < 1) {
     score = sufficiency * score + (1 - sufficiency) * NEUTRAL_SCORE
-    adjustments.push(
-      `本周只有 ${weekSessions} 次记录，数据偏少，评分已向中间值收敛`,
-    )
+    adjustments.push({
+      text: `本周只有 ${weekSessions} 次记录，数据偏少，评分已向中间值收敛`,
+      delta: Math.round(score) - before,
+    })
   }
 
   // ② 安全下调
   const worst = worstSeverity(weekAlerts)
   if (worst === 'critical' || worst === 'warning') {
     const n = weekAlerts.filter((a) => a.severity === worst).length
+    const from = Math.round(score)
     score *= SAFETY_PENALTY[worst]
-    adjustments.push(
-      worst === 'critical'
-        ? `本周有 ${n} 次严重安全事件（温度超过安全阈值或信号中断），评分已下调`
-        : `本周有 ${n} 次安全提醒，评分已下调`,
-    )
+    adjustments.push({
+      text:
+        worst === 'critical'
+          ? `本周有 ${n} 次严重安全事件（温度超过安全阈值或信号中断），评分已下调`
+          : `本周有 ${n} 次安全提醒，评分已下调`,
+      delta: Math.round(score) - from,
+    })
   }
 
   return { score: Math.round(score), adjustments }
@@ -623,7 +744,38 @@ function alertAdvice(a: Alert): string {
 }
 
 /**
- * 从"最弱的那一项"生成建议。
+ * 生成"下一步建议"。
+ *
+ * 【为什么不按分值挑最弱的那一项】
+ * 原先是拿四个分量的分值比大小、挑最低的说。这个规则看着公平，实际
+ * 是错的 —— **四个分量的"正常水平"根本不同**：
+ *
+ *   训练坚持  要么够要么不够，满分是常态
+ *   动作达标  康复中的患者通常接近满分
+ *   动作稳定  天然带波动，89 分是正常发挥而不是问题
+ *
+ * 拿它们的绝对值比大小，低分永远出在稳定项上。实测（demo 数据）：
+ * 稳定 89 被挑中，建议说「把动作放慢一些」；而同一份数据里真正该说的
+ * 是「坐位伸膝差 8°」—— 证据就在「动作达标」那一项里，因为分值 99
+ * 排不到前面，被丢掉了。
+ *
+ * 【现在的规则】
+ * 固定优先级，每一档各自有"够不够格被提"的条件：
+ *
+ *   ① 未处理的严重预警   —— 安全问题永远第一
+ *   ② 动作确实不稳       —— 门槛与文案同一套阈值（见 scoreConfig）
+ *   ③ 训练频次不够       —— 依从性是一切的前提
+ *   ④ 有具体动作没达标   —— 指名道姓 + 说清差多少
+ *   ⑤ 其余               —— 保住成果
+ *
+ * 【为什么"不稳"要排在"没达标"前面】
+ * 稳定性差的时候，"平均值差多少度"是**误导性的描述**。一个在 45° 和
+ * 90° 之间反复横跳、目标 90° 的患者，平均完成度只有 50%，按第 ④ 档
+ * 会告诉他"还差 45°" —— 可他明明三次做到了 90°，真正的问题是他稳不住。
+ * 照"再放开一点"去练没有用，该做的是放慢。
+ *
+ * 所以第 ④ 档加了一条限制：**只有在动作本身不稳时才会被前面的档位拦下**，
+ * 否则"差多少度"才是对当前状态的准确描述。
  *
  * 规则驱动而不是大模型：每一条都能被治疗师审核，答辩时也能说清依据。
  * 将来若要用大模型润色文案，改的应该是措辞，不是"说什么" —— 决定
@@ -632,7 +784,6 @@ function alertAdvice(a: Alert): string {
 function adviceFor(
   parts: ScorePart[],
   weekAlerts: Alert[],
-  score: number,
   stats: Insight['stats'],
 ): SummaryCard {
   const base = {
@@ -650,7 +801,7 @@ function adviceFor(
     }
   }
 
-  // 有未处理的严重预警时，建议围绕它展开 —— 这比谈分数重要得多
+  // ① 有未处理的严重预警时，建议围绕它展开 —— 这比谈分数重要得多
   const critical = weekAlerts.find(
     (a) => a.severity === 'critical' && a.acknowledged_at === null,
   )
@@ -663,27 +814,17 @@ function adviceFor(
     }
   }
 
-  const weakest = [...parts].sort((a, b) => a.value - b.value)[0]!
+  const partOf = (k: ScorePart['key']) => parts.find((p) => p.key === k)!
+  const target = partOf('target')
 
-  if (weakest.key === 'adherence') {
-    return {
-      ...base,
-      headline: `这周训练了 ${stats.weekDays} 天，建议补到 ${RECOMMENDED_DAYS_PER_WEEK} 天`,
-      detail: '康复训练靠的是频次稳定，隔太久效果会打折',
-      band: 'yellow',
-    }
-  }
-
-  if (weakest.key === 'target') {
-    return {
-      ...base,
-      headline: '继续保持，动作幅度还可以再大一点',
-      detail: weakest.detail,
-      band: 'yellow',
-    }
-  }
-
-  if (weakest.key === 'stability') {
+  // ② 动作确实不稳。门槛与稳定项文案用的是同一套阈值 ——
+  //    文案说"偶有起伏，总体可控"的时候，不该同时在建议里让人放慢。
+  //
+  //    排在"没达标"前面：不稳的时候"平均差多少度"会误导人。
+  //    一个在 45° 和 90° 之间横跳、目标 90° 的患者，平均完成度只有 50%，
+  //    但"还差 45°"不是对他状态的准确描述 —— 他三次做到了 90°，
+  //    问题是他稳不住，该放慢而不是再放开
+  if (partOf('stability').value < STABILITY_CONCERN_SCORE) {
     return {
       ...base,
       headline: '把动作放慢一些，让每次幅度更接近',
@@ -692,10 +833,35 @@ function adviceFor(
     }
   }
 
-  if (weakest.key === 'progress') {
+  // ③ 训练频次不够。练得太少时，"某个动作差几度"还不足以说明问题
+  if (partOf('adherence').value < 1) {
     return {
       ...base,
-      headline: score >= 70 ? '保持现在的节奏就好' : '最近进步放缓，别着急',
+      headline: `这周训练了 ${stats.weekDays} 天，建议补到 ${RECOMMENDED_DAYS_PER_WEEK} 天`,
+      detail: '康复训练靠的是频次稳定，隔太久效果会打折',
+      band: 'yellow',
+    }
+  }
+
+  // ④ 有具体动作没达标。指名道姓 + 说清差多少 —— 家属知道该盯哪一个
+  if (target.weakest) {
+    const w = target.weakest
+    const gap = Math.round(w.target - w.actual)
+    return {
+      ...base,
+      headline: `「${w.exercise}」还差 ${gap}°，下次再放开一点`,
+      detail:
+        `本周实测 ${Math.round(w.actual)}°，目标 ${w.target}°。` +
+        '在无痛范围内逐步增加幅度，不要硬拉',
+      band: 'yellow',
+    }
+  }
+
+  // ⑤ 动作都达标、练得也够，但比之前有回落 —— 说说这件事
+  if (partOf('progress').value < 0.4) {
+    return {
+      ...base,
+      headline: '最近进步放缓，别着急',
       detail: '康复有平台期是正常的，坚持训练就会继续改善',
       band: 'green',
     }
@@ -787,7 +953,7 @@ export function buildInsight(
       cards: [
         todayCard([], []),
         riskCard(weekAlerts),
-        adviceFor(parts, weekAlerts, 0, stats),
+        adviceFor(parts, weekAlerts, stats),
       ],
       stats,
     }
@@ -812,7 +978,7 @@ export function buildInsight(
     cards: [
       todayCard(today, week),
       riskCard(weekAlerts),
-      adviceFor(parts, weekAlerts, score, stats),
+      adviceFor(parts, weekAlerts, stats),
     ],
     stats,
   }

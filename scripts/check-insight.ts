@@ -391,7 +391,7 @@ console.log('\n--- 安全事件必须扣分，而且必须说明 ---')
   )
   const clean = buildInsight(perfect, [], NOW)
 
-  check('无安全事件时不产生调整说明', clean.adjustments.length === 0, clean.adjustments.join('; '))
+  check('无安全事件时不产生调整说明', clean.adjustments.length === 0, clean.adjustments.map((a) => a.text).join('; '))
   check('无调整时 rawScore 与 score 相同', clean.rawScore === clean.score, `${clean.rawScore} vs ${clean.score}`)
   check('全达标且无预警 → 高分', clean.score! >= 80, String(clean.score))
   expectBand('全达标且无预警 → 绿灯', clean, 'green')
@@ -410,8 +410,8 @@ console.log('\n--- 安全事件必须扣分，而且必须说明 ---')
   )
   check(
     '调整被写进 adjustments 且说的是人话',
-    warned.adjustments.length === 1 && warned.adjustments[0]!.includes('安全提醒'),
-    warned.adjustments.join('; ') || '(空)',
+    warned.adjustments.length === 1 && warned.adjustments[0]!.text.includes('安全提醒'),
+    warned.adjustments.map((a) => a.text).join('; ') || '(空)',
   )
   expectBand('一般预警 → 黄灯', warned, 'yellow')
 
@@ -420,8 +420,8 @@ console.log('\n--- 安全事件必须扣分，而且必须说明 ---')
   check('严重事件后分数落到 60 以下', critical.score! < 60, String(critical.score))
   check(
     '说明里点出是严重安全事件',
-    critical.adjustments.some((a) => a.includes('严重安全事件')),
-    critical.adjustments.join('; '),
+    critical.adjustments.some((a) => a.text.includes('严重安全事件')),
+    critical.adjustments.map((a) => a.text).join('; '),
   )
   expectBand('严重预警 → 红灯', critical, 'red')
 
@@ -432,7 +432,7 @@ console.log('\n--- 安全事件必须扣分，而且必须说明 ---')
     NOW,
   )
   check('多条同级预警不累加', many.score === warned.score, `${many.score} vs ${warned.score}`)
-  check('但次数要写在说明里', many.adjustments[0]!.includes('3 次'), many.adjustments[0]!)
+  check('但次数要写在说明里', many.adjustments[0]!.text.includes('3 次'), many.adjustments[0]!)
 
   // 一周前的预警不该影响本周
   const oldAlert = buildInsight(
@@ -440,7 +440,7 @@ console.log('\n--- 安全事件必须扣分，而且必须说明 ---')
     [alert({ severity: 'critical', occurred_at: daysAgo(30) })],
     NOW,
   )
-  check('一个月前的预警不影响本周', oldAlert.adjustments.length === 0, oldAlert.adjustments.join('; '))
+  check('一个月前的预警不影响本周', oldAlert.adjustments.length === 0, oldAlert.adjustments.map((a) => a.text).join('; '))
   expectBand('一个月前的预警不影响本周', oldAlert, 'green')
 
   // 预警文案要说人话，不是 kind 的英文
@@ -460,8 +460,8 @@ console.log('\n--- 数据不足时分数要向中间值收敛 ---')
   const one = buildInsight([session({ rom_deg: 90 })], [], NOW)
   check(
     '1 次记录会产生调整说明',
-    one.adjustments.some((a) => a.includes('数据偏少')),
-    one.adjustments.join('; '),
+    one.adjustments.some((a) => a.text.includes('数据偏少')),
+    one.adjustments.map((a) => a.text).join('; '),
   )
 
   const five = buildInsight(
@@ -471,8 +471,8 @@ console.log('\n--- 数据不足时分数要向中间值收敛 ---')
   )
   check(
     '5 次记录不再收缩',
-    !five.adjustments.some((a) => a.includes('数据偏少')),
-    five.adjustments.join('; ') || '(无调整)',
+    !five.adjustments.some((a) => a.text.includes('数据偏少')),
+    five.adjustments.map((a) => a.text).join('; ') || '(无调整)',
   )
 
   // 收缩要显著缩小"1 个样本"的区分度
@@ -646,6 +646,274 @@ console.log('\n--- 建议随最弱项变化 ---')
     urgent.cards[2]!.headline,
   )
   expectBand('建议卡片也是红的', urgent.cards[2]!, 'red')
+}
+
+// ============================================================================
+console.log('\n--- 达标之后继续进步，必须看得见 ---')
+// ============================================================================
+// 本次修复的核心。原先"完成度"被 clamp 到 1.0，于是**一旦达到康复目标，
+// 「进步情况」这一项就永久失效**。实测（固定基线 90°，只改本周成绩）：
+//
+//     本周 90° → 79 分，进步 50「和之前两周相比基本持平」
+//     本周 95° → 79 分，进步 50「和之前两周相比基本持平」
+//     本周 120° → 79 分，进步 50「和之前两周相比基本持平」
+//     本周 140° → 79 分，进步 50「和之前两周相比基本持平」
+//
+// 四种情况给出**完全相同**的分和**完全相同**的一句话。而退步反而测
+// 得出来（75° → 63 分）。康复中后期的主要目标恰恰就是"达标之后继续
+// 改善"，那段时间里 30% 的权重等于不存在。
+//
+// 这一组断言就是钉住它：达标之后的改善必须体现在分数上。
+{
+  // 一周练满 5 天，避开"数据充分度收缩"的干扰 —— 收缩会把分数拉向 65，
+  // 把三种情况的差距压到 1~2 分，那样断言会因为精度而变得脆弱
+  const at = (rom: number) => {
+    const week = [0, 1, 2, 3, 4].map((n) =>
+      session({ rom_deg: rom, started_at: daysAgo(n) }),
+    )
+    const baseline = [9, 11, 13].map((n) =>
+      session({ rom_deg: 90, started_at: daysAgo(n) }),
+    )
+    return buildInsight([...week, ...baseline], [], NOW)
+  }
+
+  const flat = at(90)
+  const up5 = at(95)
+  const up33 = at(120)
+
+  check(
+    '达标后继续进步，分数要跟着涨',
+    up33.score! > up5.score! && up5.score! > flat.score!,
+    `90°=${flat.score} → 95°=${up5.score} → 120°=${up33.score}`,
+  )
+  check(
+    '三种情况的「进步情况」互不相同',
+    partOf(flat, 'progress').value !== partOf(up5, 'progress').value &&
+      partOf(up5, 'progress').value !== partOf(up33, 'progress').value,
+    `${partOf(flat, 'progress').value} / ${partOf(up5, 'progress').value} / ${partOf(up33, 'progress').value}`,
+  )
+  check(
+    '刚好持平仍然读作"持平"',
+    partOf(flat, 'progress').detail.includes('持平'),
+    partOf(flat, 'progress').detail,
+  )
+  check(
+    '超出目标会说"提升"',
+    partOf(up33, 'progress').detail.includes('提升'),
+    partOf(up33, 'progress').detail,
+  )
+
+  // 放开"往上"不能把"往下"也放送 —— 退步还是得读出来
+  const down = at(75)
+  check(
+    '退步仍然读作下降',
+    partOf(down, 'progress').detail.includes('下降') && down.score! < flat.score!,
+    `${down.score} 分 / ${partOf(down, 'progress').detail}`,
+  )
+}
+
+// ============================================================================
+console.log('\n--- 稳定性量的是"动作内波动"，不是"动作间差异" ---')
+// ============================================================================
+// 原先把一周里所有动作的完成度混在一起算变异系数。那样算出来的量是
+// **动作之间**的差异，不是同一个动作每次做得一不一样 —— 两件完全不同的事。
+//
+// 实测对照（同一组代码）：
+//     同一动作 6 次完全一致 + 一次坐位伸膝 72°  → 稳定 88
+//     同一动作抖动 88~98（±5%），无跨动作       → 稳定 97
+//
+// **零抖动的那一组分数反而更低。** 它在测"你有个动作没达标"，
+// 而这件事「动作达标」那一项已经说过了，在这里再说一遍是重复计分。
+{
+  const clean = buildInsight(
+    [
+      ...[0, 1, 2, 3, 4, 5].map((n) =>
+        session({ exercise: '屈膝滑动', rom_deg: 90, started_at: daysAgo(n) }),
+      ),
+      // 只做过一次、而且没达标的动作。混算时它会冒充"不稳定"
+      session({ exercise: '坐位伸膝', rom_deg: 72, started_at: daysAgo(6) }),
+    ],
+    [],
+    NOW,
+  )
+  check(
+    '同一动作零抖动 → 稳定满分（哪怕另有动作没达标）',
+    partOf(clean, 'stability').value === 1,
+    `得到 ${partOf(clean, 'stability').value}；` +
+      '若约 0.88 说明又把不同动作混在一起算了',
+  )
+  check(
+    '不能给它挂上"忽大忽小"的措辞',
+    partOf(clean, 'stability').detail.includes('发挥稳定') &&
+      !partOf(clean, 'stability').detail.includes('忽大忽小'),
+    partOf(clean, 'stability').detail,
+  )
+
+  // 反例：同一个动作自己在 45 和 90 之间反复横跳 —— 这才是真的不稳
+  const jumpy = buildInsight(
+    [45, 90, 45, 90, 45, 90].map((r, i) =>
+      session({ exercise: '屈膝滑动', rom_deg: r, started_at: daysAgo(i) }),
+    ),
+    [],
+    NOW,
+  )
+  check(
+    '同一动作反复横跳 → 判为不稳定',
+    partOf(jumpy, 'stability').value < 0.15,
+    String(partOf(jumpy, 'stability').value),
+  )
+
+  // 只练过一次的动作估不出波动，不能因为样本少就判它稳或判它不稳
+  const once = buildInsight(
+    [
+      session({ exercise: '屈膝滑动', rom_deg: 90, started_at: daysAgo(0) }),
+      session({ exercise: '坐位伸膝', rom_deg: 40, started_at: daysAgo(1) }),
+    ],
+    [],
+    NOW,
+  )
+  check(
+    '每个动作都只练过一次 → 取中性值，不硬判',
+    partOf(once, 'stability').value === 0.5,
+    String(partOf(once, 'stability').value),
+  )
+}
+
+// ============================================================================
+console.log('\n--- 没有差距的时候不说"差距最大" ---')
+// ============================================================================
+// 封顶之后所有达标的比值都是 1.0，比大小时会**随便挑一个**。实测挑出过：
+//
+//     本周达到康复目标的 100%，其中「屈膝滑动」差距最大（120° / 目标 90°）
+//
+// 120° 比目标高 33%，被称为"差距最大"。答辩时被问到这句很难解释。
+{
+  const allOk = buildInsight(
+    [0, 1, 2, 3, 4].map((n) => session({ rom_deg: 140, started_at: daysAgo(n) })),
+    [],
+    NOW,
+  )
+  check(
+    '全部超出目标时不出现"差距最大"',
+    !partOf(allOk, 'target').detail.includes('差距最大'),
+    partOf(allOk, 'target').detail,
+  )
+  check(
+    '并且不给出 weakest',
+    partOf(allOk, 'target').weakest === undefined,
+    JSON.stringify(partOf(allOk, 'target').weakest ?? null),
+  )
+
+  // 真有差距时不但要说，还要说清差多少度
+  const short = buildInsight(
+    [0, 1, 2, 3, 4].map((n) =>
+      session({ exercise: '屈膝滑动', rom_deg: 90, started_at: daysAgo(n) }),
+    ).concat([session({ exercise: '坐位伸膝', rom_deg: 72, started_at: daysAgo(5) })]),
+    [],
+    NOW,
+  )
+  check(
+    '真有差距时指名道姓',
+    partOf(short, 'target').detail.includes('坐位伸膝'),
+    partOf(short, 'target').detail,
+  )
+  check(
+    '并说清差多少度',
+    partOf(short, 'target').detail.includes('差 8°'),
+    partOf(short, 'target').detail,
+  )
+  check(
+    'weakest 被带出来供建议引用',
+    partOf(short, 'target').weakest?.exercise === '坐位伸膝',
+    JSON.stringify(partOf(short, 'target').weakest ?? null),
+  )
+}
+
+// ============================================================================
+console.log('\n--- 建议要指向真正该改的那件事 ---')
+// ============================================================================
+// 原先建议是拿四个分量的**分值**比大小、挑最低的那个说。但四个分量的
+// "正常水平"根本不同：训练坚持要么够要么不够、动作达标通常接近满分、
+// 而动作稳定天然带波动，89 分是常态而不是问题。
+//
+// 实测（demo 数据）：稳定 89 被挑中，建议说「把动作放慢一些」；
+// 而真正该说的是「坐位伸膝差 8°」—— 证据就在「动作达标」里，
+// 因为分值 99 排不到前面，被丢掉了。
+{
+  const ins = buildInsight(
+    [0, 1, 2, 3, 4].map((n) =>
+      session({ exercise: '屈膝滑动', rom_deg: 90, started_at: daysAgo(n) }),
+    ).concat([session({ exercise: '坐位伸膝', rom_deg: 72, started_at: daysAgo(5) })]),
+    [],
+    NOW,
+  )
+  const advice = ins.cards[2]!
+
+  check(
+    '建议指名未达标的那个动作',
+    advice.headline.includes('坐位伸膝'),
+    advice.headline,
+  )
+  check(
+    '并给出还差多少度',
+    advice.headline.includes('8°'),
+    advice.headline,
+  )
+  check(
+    '不再拿稳定项当替罪羊',
+    !advice.headline.includes('放慢'),
+    advice.headline,
+  )
+
+  // 稳定项**真的**很差时，仍然要说放慢 —— 门槛是"cv 大到文案会说忽大忽小"
+  const shaky = buildInsight(
+    [45, 90, 45, 90, 45, 90].map((r, i) =>
+      session({ exercise: '屈膝滑动', rom_deg: r, started_at: daysAgo(i) }),
+    ),
+    [],
+    NOW,
+  )
+  check(
+    '动作真的忽大忽小时，建议说放慢而不是"再放开"',
+    shaky.cards[2]!.headline.includes('放慢') &&
+      !shaky.cards[2]!.headline.includes('还差'),
+    `${shaky.cards[2]!.headline}（稳定 ${Math.round(partOf(shaky, 'stability').value * 100)} 分）`,
+  )
+}
+
+// ============================================================================
+console.log('\n--- 调整了多少分，要说得出数字 ---')
+// ============================================================================
+// 原先只有一句话加一个"调整前为 N 分"，家属要自己减。实测 demo 的情况是
+// raw 94 → score 80，**中间跨了一个档位**（≥90 是"恢复优秀"、
+// ≥80 是"恢复良好"），展开详情看到 94 的人会问"那我到底是多少分"。
+{
+  const perfect = [0, 1, 2, 3, 4].map((n) =>
+    session({ rom_deg: 90, started_at: daysAgo(n) }),
+  )
+  const clean = buildInsight(perfect, [], NOW)
+  const warned = buildInsight(perfect, [alert({ severity: 'warning' })], NOW)
+
+  const a = warned.adjustments[0]!
+  check(
+    '调整项带上了金额',
+    a.delta === warned.score! - clean.score!,
+    `${clean.score} → ${warned.score}，delta=${a.delta}`,
+  )
+  check('下调是负数', a.delta < 0, String(a.delta))
+
+  // 两次调整时，每一步的金额加起来等于总分差
+  const two = buildInsight(
+    [session({ rom_deg: 90, started_at: daysAgo(0) })],
+    [alert({ severity: 'warning' })],
+    NOW,
+  )
+  check(
+    '多步调整的金额之和等于总分差',
+    two.adjustments.reduce((s, x) => s + x.delta, 0) === two.score! - two.rawScore!,
+    two.adjustments.map((x) => `${x.text.slice(0, 12)}… ${x.delta}`).join(' | ') +
+      `  合计 ${two.score! - two.rawScore!}`,
+  )
 }
 
 // ---------------------------------------------------------------- 汇总
