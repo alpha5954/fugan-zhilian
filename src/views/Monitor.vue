@@ -5,7 +5,7 @@
 // 四路信号：sEMG、关节角度、温度、应变-温度解耦。
 // 数据来自模拟器（硬件尚未接入），界面全程标注「模拟数据」，不伪装成实测。
 // ============================================================================
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { ElMessage } from 'element-plus'
 
@@ -44,6 +44,26 @@ const {
 } = monitor
 
 const canExport = computed(() => monitor.samples.value.length > 0)
+
+// ---------------------------------------------------------------------------
+// 专注模式
+// ---------------------------------------------------------------------------
+/**
+ * 深色「专注模式」。
+ *
+ * 波形在深底上最接近示波器，长时间盯着也更省眼睛 —— 这是它存在的理由。
+ * 不做成全站主题：医疗界面在明亮环境下用浅色更合适，而且跳转时
+ * 一黑一白会闪。
+ *
+ * 记在 localStorage 里：这是使用习惯，不该每次进页面重设。
+ */
+const FOCUS_KEY = 'fugan:monitor-focus'
+const focusMode = ref(localStorage.getItem(FOCUS_KEY) === '1')
+
+function toggleFocus() {
+  focusMode.value = !focusMode.value
+  localStorage.setItem(FOCUS_KEY, focusMode.value ? '1' : '0')
+}
 
 /** 场景选择器的双向绑定。用 computed 的 get/set 包一层，
  *  直接把 setScenario 接上，免得在模板里写事件类型断言 */
@@ -154,7 +174,7 @@ const decoupleLegend = [
 </script>
 
 <template>
-  <div class="monitor">
+  <div class="monitor" :class="{ 'monitor--dark': focusMode }">
     <!-- 温度越阈是安全关键告警 —— 低温烫伤不可逆，必须醒目 -->
     <el-alert
       v-if="tempAlertOn"
@@ -252,6 +272,9 @@ const decoupleLegend = [
         <el-button @click="onCalibrate">校准</el-button>
         <el-button :disabled="!canExport" @click="exportCsv">导出 CSV</el-button>
         <el-button :disabled="!canExport" @click="reset">清空</el-button>
+        <el-button @click="toggleFocus">
+          {{ focusMode ? '退出专注' : '专注模式' }}
+        </el-button>
       </div>
     </section>
 
@@ -262,7 +285,13 @@ const decoupleLegend = [
           <h3 class="panel__title">表面肌电 sEMG</h3>
           <span class="panel__unit">mV</span>
         </header>
-        <SignalChart :series="emgChart" :x-data="timeAxis" :height="200" :digits="3" />
+        <SignalChart
+          :series="emgChart"
+          :x-data="timeAxis"
+          :height="200"
+          :digits="3"
+          :dark="focusMode"
+        />
       </article>
 
       <article class="panel">
@@ -270,7 +299,13 @@ const decoupleLegend = [
           <h3 class="panel__title">关节角度</h3>
           <span class="panel__unit">°</span>
         </header>
-        <SignalChart :series="angleChart" :x-data="timeAxis" :height="200" :digits="1" />
+        <SignalChart
+          :series="angleChart"
+          :x-data="timeAxis"
+          :height="200"
+          :digits="1"
+          :dark="focusMode"
+        />
       </article>
 
       <article class="panel">
@@ -289,6 +324,7 @@ const decoupleLegend = [
           :mark-areas="tempMarkAreas"
           :height="200"
           :digits="2"
+          :dark="focusMode"
         />
       </article>
 
@@ -308,6 +344,7 @@ const decoupleLegend = [
           :y-axes="DECOUPLE_AXES"
           :height="200"
           :digits="1"
+          :dark="focusMode"
         />
       </article>
     </section>
@@ -334,7 +371,7 @@ const decoupleLegend = [
   flex-wrap: wrap;
   gap: 20px;
   padding: 12px 18px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
@@ -354,10 +391,9 @@ const decoupleLegend = [
 
 .statusbar__dot.is-live {
   background: var(--ok);
-  /* 呼吸光晕。用项目自己的绿（--ok = #1c6b47）而不是 Element Plus
-     默认的 #67c23a —— 后者是消费级配色，和整套语义色不是一家的。
-     这种"差一点"最伤整体感：单看没问题，和其他绿摆一起就露馅。 */
-  box-shadow: 0 0 0 3px rgb(28 107 71 / 16%);
+  /* 呼吸光晕。走 --ok-glow 令牌而不是写死颜色 —— 暗色下要换成亮绿，
+     写死的话在深底上会是一圈脏绿。 */
+  box-shadow: 0 0 0 3px var(--ok-glow);
 }
 
 .statusbar__dot.is-idle {
@@ -463,7 +499,7 @@ const decoupleLegend = [
   flex-direction: column;
   gap: 8px;
   padding: 14px 16px 8px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-card);

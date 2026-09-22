@@ -43,6 +43,34 @@ const AXIS_FONT_SIZE = 10
 const MAX_AXIS_LABELS = 8
 
 // ---------------------------------------------------------------------------
+// 暗色取值
+// ---------------------------------------------------------------------------
+/**
+ * 实时监测页的「专注模式」用深色底 —— 波形在暗底上最接近示波器。
+ *
+ * 【为什么这里写死字面色值，而亮色那套是读令牌】
+ * 主题切换靠给页面根元素挂一个类、在其作用域内覆盖 CSS 变量。而
+ * `token()` 是从 `document.documentElement` 读的 —— **读不到页面级
+ * 作用域里的覆盖值**。所以暗色这套只能写在这里。
+ *
+ * 好处是范围可控：只有监测页会切暗色，只有 SignalChart 需要这个分支。
+ * 仪表的几个轴色改动频率极低，写死可以接受。
+ *
+ * ⚠️ 改这里要和 tokens.css 里 `.monitor--dark` 那一段一起改 ——
+ *    两边是配套的（图表的轴色和页面的底色）。
+ */
+const DARK = {
+  label: '#7b8b9e',
+  grid: '#1e2b3a',
+  axisLine: '#2a3a4d',
+  tooltipBg: '#16202c',
+  tooltipBorder: '#2a3a4d',
+  tooltipText: '#cfd9e4',
+  pointer: '#3a4d63',
+  shadow: '0 4px 14px rgb(0 0 0 / 45%)',
+} as const
+
+// ---------------------------------------------------------------------------
 // 坐标轴
 // ---------------------------------------------------------------------------
 
@@ -52,9 +80,12 @@ const MAX_AXIS_LABELS = 8
  * 用 `--ink-400`（比弱化文字再深一档）：太淡了读不清，太深了抢戏。
  * 走等宽数字，刻度值纵向能对齐。
  */
-export function axisLabelStyle(extra: Record<string, unknown> = {}) {
+export function axisLabelStyle(
+  extra: Record<string, unknown> = {},
+  dark = false,
+) {
   return {
-    color: token('--ink-400'),
+    color: dark ? DARK.label : token('--ink-400'),
     fontSize: AXIS_FONT_SIZE,
     fontFamily: token('--font-num'),
     ...extra,
@@ -78,10 +109,10 @@ export function categoryInterval(count: number): number {
  * 用**虚线**而不是实线：实线铺满之后会织成一张网，把数据压下去；
  * 虚线在同样的浓度下"存在感"低得多，而且更像工程图纸而不是网页。
  */
-export function splitLineStyle() {
+export function splitLineStyle(dark = false) {
   return {
     lineStyle: {
-      color: token('--line-soft'),
+      color: dark ? DARK.grid : token('--line-soft'),
       type: 'dashed' as const,
       width: 1,
     },
@@ -94,9 +125,9 @@ export function valueAxisLineStyle() {
 }
 
 /** 类目轴的轴线。保留一条淡的，作为数据的基线 */
-export function categoryAxisLineStyle() {
+export function categoryAxisLineStyle(dark = false) {
   return {
-    lineStyle: { color: token('--line'), width: 1 },
+    lineStyle: { color: dark ? DARK.axisLine : token('--line'), width: 1 },
   }
 }
 
@@ -110,21 +141,21 @@ export function categoryAxisLineStyle() {
  * ECharts 默认是圆角白框 + 深色粗体，一眼就是"没调过的图表"。
  * 这里改成和项目其他浮层一致：细描边、圆角小、阴影浅、数字等宽。
  */
-export function tooltipStyle() {
+export function tooltipStyle(dark = false) {
   return {
-    backgroundColor: token('--surface'),
-    borderColor: token('--line'),
+    backgroundColor: dark ? DARK.tooltipBg : token('--surface'),
+    borderColor: dark ? DARK.tooltipBorder : token('--line'),
     borderWidth: 1,
     padding: [8, 12] as [number, number],
     textStyle: {
-      color: token('--ink-700'),
+      color: dark ? DARK.tooltipText : token('--ink-700'),
       fontSize: 12,
       fontFamily: token('--font-num'),
     },
     // 提示框是 DOM 元素（不是 canvas），所以这里能直接用 CSS 变量
     extraCssText:
       `border-radius: ${token('--r-sm')};` +
-      `box-shadow: ${token('--shadow-md')};`,
+      `box-shadow: ${dark ? DARK.shadow : token('--shadow-md')};`,
   }
 }
 
@@ -133,12 +164,12 @@ export function tooltipStyle() {
  *
  * 虚线细线 + 一个小圆点。默认的实线太"硬"，而且和数据线容易混淆。
  */
-export function axisPointerStyle() {
+export function axisPointerStyle(dark = false) {
   return {
     type: 'line' as const,
     animation: false,
     lineStyle: {
-      color: token('--line-strong'),
+      color: dark ? DARK.pointer : token('--line-strong'),
       width: 1,
       type: 'dashed' as const,
     },

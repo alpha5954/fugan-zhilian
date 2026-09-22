@@ -113,6 +113,12 @@ const props = withDefaults(
     height?: number
     /** Y 轴数值保留几位小数 */
     digits?: number
+    /**
+     * 暗色主题。实时监测页的「专注模式」用。
+     *
+     * 只有这一个图表组件需要它 —— 暗色只用在监测页，而监测页只用折线图。
+     */
+    dark?: boolean
   }>(),
   {
     yAxes: () => [{ position: 'left' }],
@@ -120,6 +126,7 @@ const props = withDefaults(
     markAreas: () => [],
     height: 200,
     digits: 2,
+    dark: false,
   },
 )
 
@@ -129,6 +136,7 @@ let observer: ResizeObserver | null = null
 
 function buildOption() {
   const axes = props.yAxes.length ? props.yAxes : [{ position: 'left' as const }]
+  const dark = props.dark
 
   return {
     animation: false, // 实时流式刷新下动画只会造成拖影
@@ -142,8 +150,8 @@ function buildOption() {
       animation: false,
       confine: true,
       // 外观统一走 chartTheme —— 默认的白框圆角一眼就是"没调过"
-      ...tooltipStyle(),
-      axisPointer: axisPointerStyle(),
+      ...tooltipStyle(dark),
+      axisPointer: axisPointerStyle(dark),
       valueFormatter: (v: unknown) => formatValue(v, props.digits),
     },
     legend: { show: false }, // 图例由外层 HTML 渲染，样式更可控
@@ -151,16 +159,19 @@ function buildOption() {
       type: 'category',
       data: props.xData,
       boundaryGap: false,
-      axisLine: categoryAxisLineStyle(),
+      axisLine: categoryAxisLineStyle(dark),
       axisTick: { show: false },
       // 抽稀：默认的 auto 会算出二十几个刻度，密到读不出来
-      axisLabel: axisLabelStyle({ interval: categoryInterval(props.xData.length) }),
+      axisLabel: axisLabelStyle(
+        { interval: categoryInterval(props.xData.length) },
+        dark,
+      ),
       splitLine: { show: false },
     },
     yAxis: axes.map((axis, i) => ({
       type: 'value' as const,
       name: axis.name,
-      nameTextStyle: axisLabelStyle({ align: 'left' }),
+      nameTextStyle: axisLabelStyle({ align: 'left' }, dark),
       position: axis.position ?? (i === 1 ? 'right' : 'left'),
       min: axis.min,
       max: axis.max,
@@ -171,8 +182,8 @@ function buildOption() {
       splitNumber: 4,
       axisLine: valueAxisLineStyle(),
       axisTick: { show: false },
-      axisLabel: axisLabelStyle(),
-      splitLine: splitLineStyle(),
+      axisLabel: axisLabelStyle({}, dark),
+      splitLine: splitLineStyle(dark),
     })),
     series: props.series.map((s) => {
       // 只有第一条序列挂标线，避免标线被重复绘制
@@ -272,6 +283,10 @@ watch(
   render,
   { flush: 'post' },
 )
+
+// 主题切换也要重绘。图表颜色是在 buildOption 里现取的，不重绘的话
+// 切到专注模式后轴线和提示框还是亮色那套。
+watch(() => props.dark, render, { flush: 'post' })
 </script>
 
 <template>

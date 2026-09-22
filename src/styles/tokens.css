@@ -66,6 +66,9 @@
   --ok: #1c6b47;
   --ok-bg: #eef7f2;
   --ok-line: #bfdfcd;
+  /* 状态点外面的那圈呼吸光晕。单独一个令牌是因为暗色下要换值 ——
+     直接写在组件里的话，深色背景上会是一圈脏绿 */
+  --ok-glow: rgb(28 107 71 / 16%);
 
   --warn: #9a5b1f;
   --warn-bg: #fdf6ec;
@@ -191,4 +194,156 @@
      --------------------------------------------------------------------- */
   --header-h: 52px;
   --content-max: 1440px;
+}
+
+/* ============================================================================
+   实时监测的「专注模式」：深色
+   ============================================================================
+   波形图在深底上最接近示波器 —— 这是这个模式存在的唯一理由。
+
+   【为什么做成页内开关，不做全站深色主题】
+     1. 全站深色要维护两套完整配色，而医疗界面在明亮环境下用浅色更合适
+     2. 跳转时页面一黑一白会闪
+     3. 家属在户外用手机看，深色屏反光更难看
+
+   所以只在监测页、只在用户主动打开时生效。作用域是这个类的子树，
+   **顶栏不受影响** —— 那是应用外壳，不是仪器面板。
+
+   ⚠️ **图表拿不到这里的值。** `token()` 从 `document.documentElement`
+      读，读不到页面级作用域里的覆盖。所以 chartTheme.ts 里另有一套
+      写死的暗色轴色，两边必须配套改。
+   ============================================================================ */
+.monitor--dark {
+  /* 表面：深蓝黑，不用纯黑。纯黑配亮线会有光晕感，反而看不清 */
+  --canvas: #0a1119;
+  --surface: #111a24;
+  --surface-sunken: #0d151d;
+  --surface-raised: #16202c;
+
+  --line: #223040;
+  --line-soft: #1a2632;
+  --line-strong: #2f4050;
+
+  /* 文字反相。不用纯白 —— 纯白配深底长时间看会累 */
+  --ink-900: #f2f6fa;
+  --ink-800: #e4ebf2;
+  --ink-700: #cfd9e4;
+  --ink-600: #a9b7c6;
+  --ink-500: #8b9bad;
+  --ink-400: #7b8b9e;
+  --ink-300: #63748a;
+  --ink-200: #3d4d5e;
+
+  /* 品牌蓝提亮：#1a4d87 放在 #0a1119 上几乎看不见 */
+  --brand-700: #6fb3e8;
+  --brand-600: #5aa4e0;
+  --brand-500: #4a95d4;
+
+  /* 语义色同理，深底上往亮的方向走一档 */
+  --ok: #4ec98a;
+  --ok-bg: #0f2419;
+  --ok-line: #1d4a33;
+  --ok-glow: rgb(78 201 138 / 22%);
+
+  --warn: #e0a44e;
+  --warn-bg: #2a1f0e;
+  --warn-line: #4a3a1d;
+
+  --danger: #e86a6a;
+  --danger-bg: #2a1414;
+  --danger-line: #4a2222;
+
+  /* 深底本身就分层，再叠投影只会显脏 */
+  --shadow-card: none;
+
+  /* ---------------------------------------------------------------------
+     把 Element Plus 的变量重新声明一遍
+     ---------------------------------------------------------------------
+     ⚠️ 这一步**不能省**，而且原因不明显：
+
+     element.css 里的映射写在 `:root` 上，形如
+         --el-bg-color: var(--surface);
+     CSS 自定义属性里的 `var()` 是在**声明处**求值的 —— `:root` 上
+     `--surface` 是 #ffffff，于是 `--el-bg-color` 一路继承下去的就是
+     "#ffffff" 这个结果，而不是"对 --surface 的引用"。
+
+     所以只覆盖 `--surface` 是不够的，EP 的按钮、标签、警告条仍然全白。
+     实测确认过：作用域内 `--surface` 已经是 #111a24 了，而按钮拿到的
+     `--el-bg-color` 还是 #ffffff。
+
+     把它们在本作用域里重新声明一次，`var()` 才会用这里的值重新求值。
+     只列监测页实际用到的那些（按钮、单选、标签、警告条）。
+     --------------------------------------------------------------------- */
+  --el-bg-color: var(--surface);
+  --el-bg-color-page: var(--canvas);
+  --el-bg-color-overlay: var(--surface-raised);
+  --el-fill-color: var(--surface-sunken);
+  --el-fill-color-light: var(--surface-sunken);
+  --el-fill-color-lighter: var(--surface-sunken);
+  --el-fill-color-blank: var(--surface);
+
+  --el-text-color-primary: var(--ink-800);
+  --el-text-color-regular: var(--ink-600);
+  --el-text-color-secondary: var(--ink-400);
+  --el-text-color-placeholder: var(--ink-300);
+
+  --el-border-color: var(--line);
+  --el-border-color-light: var(--line-soft);
+  --el-border-color-lighter: var(--line-soft);
+  --el-border-color-hover: var(--brand-400);
+
+  --el-color-info: var(--ink-400);
+  --el-color-black: var(--ink-900);
+
+  /* 语义色同样要重声明 —— 不重声明的话标签的字色会停在根上的深橙
+     （#9a5b1f），在深底上几乎看不清。light-N 是 EP 给边框和浅底
+     用的，在深色里直接映射到本作用域的几个令牌上。 */
+  --el-color-success: var(--ok);
+  --el-color-success-light-3: var(--ok);
+  --el-color-success-light-5: var(--ok-line);
+  --el-color-success-light-7: var(--ok-line);
+  --el-color-success-light-8: var(--ok-line);
+  --el-color-success-light-9: var(--ok-bg);
+  --el-color-success-dark-2: var(--ok);
+
+  --el-color-warning: var(--warn);
+  --el-color-warning-light-3: var(--warn);
+  --el-color-warning-light-5: var(--warn-line);
+  --el-color-warning-light-7: var(--warn-line);
+  --el-color-warning-light-8: var(--warn-line);
+  --el-color-warning-light-9: var(--warn-bg);
+  --el-color-warning-dark-2: var(--warn);
+
+  --el-color-danger: var(--danger);
+  --el-color-error: var(--danger);
+  --el-color-danger-light-3: var(--danger);
+  --el-color-danger-light-5: var(--danger-line);
+  --el-color-danger-light-7: var(--danger-line);
+  --el-color-danger-light-8: var(--danger-line);
+  --el-color-danger-light-9: var(--danger-bg);
+  --el-color-danger-dark-2: var(--danger);
+
+  --el-color-error-light-3: var(--danger);
+  --el-color-error-light-5: var(--danger-line);
+  --el-color-error-light-7: var(--danger-line);
+  --el-color-error-light-8: var(--danger-line);
+  --el-color-error-light-9: var(--danger-bg);
+  --el-color-error-dark-2: var(--danger);
+
+  /* 主色。**必须一起重声明**，否则 --el-color-primary 停在根上的
+     #1a4d87（深蓝），而 --el-color-white 已经跟着 --surface 变成了
+     深色 —— 结果是"深蓝底 + 深色字"，主按钮直接读不出来。实测踩过。
+
+     重声明之后是「亮蓝底 + 深色字」，这也是深色界面里主按钮的常规做法。 */
+  --el-color-primary: var(--brand-700);
+  --el-color-primary-light-3: var(--brand-600);
+  --el-color-primary-light-5: var(--brand-500);
+  --el-color-primary-light-7: var(--brand-500);
+  --el-color-primary-light-8: var(--brand-600);
+  --el-color-primary-light-9: var(--surface-raised);
+  --el-color-primary-dark-2: var(--brand-500);
+
+  /* 「白」在这里就是字面意义的白 —— 它被用作彩色底上的文字色。
+     跟着 --surface 走的话，深色模式下会变成深色字。 */
+  --el-color-white: #ffffff;
 }
