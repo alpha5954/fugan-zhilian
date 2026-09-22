@@ -174,6 +174,9 @@ async function save() {
       duration_s: r.durationS,
       rep_count: form.repCount,
       rom_deg: Number(r.romMax.toFixed(2)),
+      // 静力动作的判定指标。动态动作存 null —— 见 types 里 hold_deg 的说明
+      hold_deg:
+        r.metric === 'hold' ? Number(r.holdAngle.toFixed(2)) : null,
       temp_c: Number(r.tempMax.toFixed(2)),
       // numeric(6,4) —— 总共 6 位、小数 4 位，所以整数部分最多两位。
       // RMS 是 mV 量级（0.0x ~ 1.x），不会溢出，但仍按列精度取整避免隐式舍入

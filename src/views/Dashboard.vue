@@ -28,6 +28,7 @@ import StateBlock from '@/components/StateBlock.vue'
 import { PERFORMANCE_METRICS } from '@/constants/project'
 import { buildDemoAlerts, buildDemoSessions } from '@/lib/demoData'
 import { buildInsight, type Insight } from '@/lib/insight'
+import { SCORE_DISCLAIMER } from '@/lib/scoreConfig'
 import { useAlertStore } from '@/stores/alert'
 import { useCareStore } from '@/stores/care'
 import { useDeviceStore } from '@/stores/device'
@@ -174,16 +175,32 @@ onMounted(reload)
       </p>
       <p v-else class="score__value score__value--empty">— —</p>
 
-      <!-- 风险单独一行，并且**写明它说的是"风险"**。
-           分数和风险是两个不同的轴：可能恢复得很好但有一次温度超标。
-           不加这个标签的话，家属会以为角标是在评价上面那个分数 ——
-           实测截图里就出现过"92 分配橙色需要注意"这种自相矛盾的画面 -->
-      <p class="score__risk">
-        <span class="score__risk-label">本周风险</span>
-        <RiskBadge :band="insight.band" size="md" />
+      <!-- 档位。分数本身只是一个数，档位负责**解释它意味着什么** ——
+           一个"完美但处在平台期"的患者拿到 85 分，单看数字家属会问
+           "为什么不是 100"，配上「恢复良好 · 保持得很好」就不用解释了。
+           灯和分数同源（安全事件已经算进分数里），不会互相矛盾 -->
+      <p v-if="insight.score !== null" class="score__level">
+        <RiskBadge :band="insight.scoreBand" dot size="md" />
+        <strong class="score__level-name">{{ insight.level.label }}</strong>
+        <span class="score__level-detail">{{ insight.level.detail }}</span>
       </p>
 
       <p class="score__headline">{{ insight.headline }}</p>
+
+      <!-- 分数被调整过就必须说明。悄悄改分是这个界面最不能做的事 ——
+           家属会觉得"我没做错什么，分数怎么掉了" -->
+      <div v-if="insight.adjustments.length" class="score__adj">
+        <p
+          v-for="(text, i) in insight.adjustments"
+          :key="i"
+          class="score__adj-item"
+        >
+          <span aria-hidden="true">⚠</span> {{ text }}
+        </p>
+        <p v-if="insight.rawScore !== insight.score" class="score__adj-raw">
+          调整前为 {{ insight.rawScore }} 分
+        </p>
+      </div>
 
       <!-- 无数据时给一条明确的出路，而不是让家属对着空白页发呆 -->
       <div v-if="!insight.stats.hasAnyData" class="score__cta">
@@ -285,6 +302,14 @@ onMounted(reload)
           <RouterLink to="/analysis" class="detail__link">数据分析</RouterLink>
           页。
         </p>
+
+        <!-- ⚠️ 这句话必须留在界面上，不能只写在文档里。
+             这个分数是从传感器数据算出来的**过程性指标**，不是经过信效度
+             检验的临床量表（KOOS、Lysholm 那类有常模、有验证）。
+             答辩时被问"这个分数验证过没有"，诚实的回答是"没有" ——
+             界面上先写清楚反而是加分项，说成"类 KOOS 评分"会被当场问穿。
+             文案在 lib/scoreConfig.ts 里，改那里。 -->
+        <p class="detail__disclaimer">{{ SCORE_DISCLAIMER }}</p>
       </div>
     </section>
   </div>
@@ -429,16 +454,61 @@ onMounted(reload)
   color: var(--ink-400);
 }
 
-.score__risk {
+.score__level {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: var(--sp-2);
   margin: 0;
 }
 
-.score__risk-label {
+.score__level-name {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--ink-800);
+}
+
+.score__level-detail {
+  font-size: var(--fs-sm);
+  color: var(--ink-500);
+}
+
+/* ---------- 评分调整说明 ----------
+   用中性偏警示的底，不用大红 —— 这是解释，不是警报 */
+.score__adj {
+  width: 100%;
+  max-width: 36em;
+  margin-top: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-sm);
+  background: var(--warn-bg);
+  text-align: left;
+}
+
+.score__adj-item {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-base);
+  color: var(--warn);
+}
+
+.score__adj-raw {
+  margin: 4px 0 0;
   font-size: var(--fs-xs);
   color: var(--ink-400);
+}
+
+/* ---------- 免责声明 ----------
+   比脚注再弱一档：它是必要的法律/伦理声明，但不该抢注意力 */
+.detail__disclaimer {
+  margin: var(--sp-3) 0 0;
+  padding-top: var(--sp-3);
+  border-top: 1px dashed var(--line);
+  font-size: var(--fs-micro);
+  line-height: var(--lh-loose);
+  color: var(--ink-300);
 }
 
 .score__headline {

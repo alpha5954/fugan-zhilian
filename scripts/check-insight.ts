@@ -47,6 +47,9 @@ function session(over: Partial<RehabSession> = {}): RehabSession {
     duration_s: 32,
     rep_count: 8,
     rom_deg: 90,
+    // 默认 null：模拟"动态动作"或"没有保持角度的老记录"。
+    // 测静力动作时要显式给值
+    hold_deg: null,
     temp_c: 33,
     rms_mv: 0.4,
     confidence: 0.95,
@@ -139,32 +142,61 @@ console.log('\n--- 达标度 ---')
   const half = buildInsight([session({ rom_deg: 45 })], [], NOW)
   check('做一半 → 达标度 0.5', Math.abs(partOf(half, 'target').value - 0.5) < 1e-9, String(partOf(half, 'target').value))
 
-  // ---- 静力动作必须被排除 ----
-  // 靠墙静蹲目标 55° 指的是**保持角度**，而表里只存 rom_deg（活动范围）。
-  // 静蹲的活动范围天然只有 5~10°，拿它比 55 会得出接近 0 的完成度，
-  // 把一个做得完全正确的患者的总分拖垮。
+  // ---- 静力动作按「保持角度」参与判定 ----
+  // 靠墙静蹲目标 55° 指的是保持角度。静蹲的活动范围天然只有 5~10°，
+  // 拿它比 55° 会把做得完全正确的患者判成 0 分。
   //
-  // 这条断言必须能区分两种实现：排除 → 1.0；不排除 → (1.0+0.145)/2 ≈ 0.57
-  const withStatic = buildInsight(
+  // 迁移 9 加了 hold_deg 之后这类动作才算真正接上。
+  const staticOk = buildInsight(
+    [session({ exercise: '靠墙静蹲', rom_deg: 8, hold_deg: 55 })],
+    [],
+    NOW,
+  )
+  check(
+    '静力动作按保持角度参与判定',
+    partOf(staticOk, 'target').value === 1,
+    `得到 ${partOf(staticOk, 'target').value}`,
+  )
+
+  const staticHalf = buildInsight(
+    [session({ exercise: '靠墙静蹲', rom_deg: 8, hold_deg: 27.5 })],
+    [],
+    NOW,
+  )
+  check(
+    '静力动作不是拿活动范围去比',
+    Math.abs(partOf(staticHalf, 'target').value - 0.5) < 1e-9,
+    `得到 ${partOf(staticHalf, 'target').value}` +
+      `（若约 0.145 说明用了 rom_deg）`,
+  )
+
+  // 动态动作与静力动作混在一起时，各按各的指标算
+  const mixed = buildInsight(
     [
-      session({ exercise: '屈膝滑动', rom_deg: 90 }),
-      session({ exercise: '靠墙静蹲', rom_deg: 8 }),
+      session({ exercise: '屈膝滑动', rom_deg: 90, hold_deg: null }),
+      session({ exercise: '靠墙静蹲', rom_deg: 8, hold_deg: 55 }),
     ],
     [],
     NOW,
   )
   check(
-    '静力动作不参与达标判定',
-    partOf(withStatic, 'target').value === 1,
-    `期望 1.0，得到 ${partOf(withStatic, 'target').value}（若为 0.57 左右说明没排除）`,
+    '动态与静力混排时各按各的指标',
+    mixed.parts.find((p) => p.key === 'target')!.value === 1,
+    String(mixed.parts.find((p) => p.key === 'target')!.value),
   )
 
-  // 全靠墙静蹲时不该算出 0 分，而应说明"没有可判定的记录"
-  const onlyStatic = buildInsight([session({ exercise: '靠墙静蹲', rom_deg: 8 })], [], NOW)
+  // 老记录没有 hold_deg（这列是后加的，无法还原）。取不到值就跳过，
+  // 不要拿 rom_deg 去硬凑 —— 宁可少算，也不要算错
+  const legacy = buildInsight(
+    [session({ exercise: '靠墙静蹲', rom_deg: 8, hold_deg: null })],
+    [],
+    NOW,
+  )
   check(
-    '只有静力动作时说明没有可判定记录',
-    partOf(onlyStatic, 'target').detail.includes('静力动作不参与'),
-    partOf(onlyStatic, 'target').detail,
+    '没有 hold_deg 的老记录被跳过而不是硬凑',
+    partOf(legacy, 'target').value === 0 &&
+      partOf(legacy, 'target').detail.includes('还没有可用于判定'),
+    partOf(legacy, 'target').detail,
   )
 }
 
@@ -346,89 +378,159 @@ console.log('\n--- 时间窗口的边界 ---')
 }
 
 // ============================================================================
-console.log('\n--- 预警必须能盖过评分 ---')
+console.log('\n--- 安全事件必须扣分，而且必须说明 ---')
 // ============================================================================
+// 实测过旧版的行为：有严重温度预警的一周**仍然显示 85 分**，只是把颜色
+// 变红了 —— 数字和颜色互相矛盾，而数字的说服力更强。这在医疗产品里
+// 不能接受：一个真出过安全问题的一周，分数不该好看。
+//
+// 现在改成按最严重的等级下调，并把调整写进 adjustments，界面必须展示。
 {
-  // 一周全达标 → 分数高、绿灯
-  const perfect = buildInsight(
-    [0, 1, 2, 3, 4].map((n) => session({ rom_deg: 90, started_at: daysAgo(n) })),
-    [],
-    NOW,
+  const perfect = [0, 1, 2, 3, 4].map((n) =>
+    session({ rom_deg: 90, started_at: daysAgo(n) }),
   )
-  check('全达标且无预警 → 高分', perfect.score! >= 80, String(perfect.score))
-  expectBand('全达标且无预警 → 绿灯', perfect, 'green')
+  const clean = buildInsight(perfect, [], NOW)
 
-  // 加一条严重预警 —— 分数一点没变，但必须是红的。
-  // 只看分数的话，一个动作全面退步但没触发阈值的患者反而是绿的，
-  // 那是最危险的情况，因为没人会去看
-  const withCritical = buildInsight(
-    [0, 1, 2, 3, 4].map((n) => session({ rom_deg: 90, started_at: daysAgo(n) })),
-    [alert({ severity: 'critical', kind: 'temp_high' })],
-    NOW,
-  )
-  check('严重预警不改变分数', withCritical.score === perfect.score, `${withCritical.score} vs ${perfect.score}`)
-  expectBand('分数很高但有严重预警 → 红灯', withCritical, 'red')
+  check('无安全事件时不产生调整说明', clean.adjustments.length === 0, clean.adjustments.join('; '))
+  check('无调整时 rawScore 与 score 相同', clean.rawScore === clean.score, `${clean.rawScore} vs ${clean.score}`)
+  check('全达标且无预警 → 高分', clean.score! >= 80, String(clean.score))
+  expectBand('全达标且无预警 → 绿灯', clean, 'green')
 
-  const withWarning = buildInsight(
-    [0, 1, 2, 3, 4].map((n) => session({ rom_deg: 90, started_at: daysAgo(n) })),
-    [alert({ severity: 'warning' })],
+  const warned = buildInsight(perfect, [alert({ severity: 'warning' })], NOW)
+  check('一般预警会下调分数', warned.score! < clean.score!, `${clean.score} → ${warned.score}`)
+  check(
+    '下调比例按配置走（×0.85）',
+    warned.score === Math.round(clean.score! * 0.85),
+    `${warned.score}，期望 ${Math.round(clean.score! * 0.85)}`,
+  )
+  check(
+    '保留调整前的分数，界面才能说"原多少分"',
+    warned.rawScore === clean.rawScore,
+    String(warned.rawScore),
+  )
+  check(
+    '调整被写进 adjustments 且说的是人话',
+    warned.adjustments.length === 1 && warned.adjustments[0]!.includes('安全提醒'),
+    warned.adjustments.join('; ') || '(空)',
+  )
+  expectBand('一般预警 → 黄灯', warned, 'yellow')
+
+  const critical = buildInsight(perfect, [alert({ severity: 'critical' })], NOW)
+  check('严重预警下调更多', critical.score! < warned.score!, `${warned.score} → ${critical.score}`)
+  check('严重事件后分数落到 60 以下', critical.score! < 60, String(critical.score))
+  check(
+    '说明里点出是严重安全事件',
+    critical.adjustments.some((a) => a.includes('严重安全事件')),
+    critical.adjustments.join('; '),
+  )
+  expectBand('严重预警 → 红灯', critical, 'red')
+
+  // 按**最严重的**那一条算，不累加 —— 3 次一般提醒不等于比 1 次严重 3 倍
+  const many = buildInsight(
+    perfect,
+    [alert({ severity: 'warning' }), alert({ severity: 'warning' }), alert({ severity: 'warning' })],
     NOW,
   )
-  expectBand('一般预警 → 黄灯', withWarning, 'yellow')
+  check('多条同级预警不累加', many.score === warned.score, `${many.score} vs ${warned.score}`)
+  check('但次数要写在说明里', many.adjustments[0]!.includes('3 次'), many.adjustments[0]!)
 
   // 一周前的预警不该影响本周
   const oldAlert = buildInsight(
-    [0, 1, 2, 3, 4].map((n) => session({ rom_deg: 90, started_at: daysAgo(n) })),
+    perfect,
     [alert({ severity: 'critical', occurred_at: daysAgo(30) })],
     NOW,
   )
+  check('一个月前的预警不影响本周', oldAlert.adjustments.length === 0, oldAlert.adjustments.join('; '))
   expectBand('一个月前的预警不影响本周', oldAlert, 'green')
 
   // 预警文案要说人话，不是 kind 的英文
-  const card = withCritical.cards.find((c) => c.key === 'risk')!
+  const card = critical.cards.find((c) => c.key === 'risk')!
   check('风险卡片翻译成家属语言', card.headline.includes('皮肤温度偏高'), card.headline)
   check('并给出该怎么做', card.detail.includes('热敷'), card.detail)
   check('未处理的预警会标出来', card.detail.includes('尚未处理'), card.detail)
 }
 
 // ============================================================================
-console.log('\n--- 评分色与风险色是两个轴 ---')
+console.log('\n--- 数据不足时分数要向中间值收敛 ---')
 // ============================================================================
-// 实测截图时发现的：一次温度提醒把 92 分染成了橙色"需要注意"，
-// 而下面那句话写的是"恢复情况很好" —— 自相矛盾。
+// 没有这一层的话，"本周只练了 1 次"也能算出一个看起来很确切的分数。
+// 实测过：1 次做满 85 分、1 次不达标 30 分 —— **1 个样本给出了 55 分的
+// 区分度**，那不是在描述患者，是在描述随机性。
+{
+  const one = buildInsight([session({ rom_deg: 90 })], [], NOW)
+  check(
+    '1 次记录会产生调整说明',
+    one.adjustments.some((a) => a.includes('数据偏少')),
+    one.adjustments.join('; '),
+  )
+
+  const five = buildInsight(
+    [0, 1, 2, 3, 4].map((n) => session({ rom_deg: 90, started_at: daysAgo(n) })),
+    [],
+    NOW,
+  )
+  check(
+    '5 次记录不再收缩',
+    !five.adjustments.some((a) => a.includes('数据偏少')),
+    five.adjustments.join('; ') || '(无调整)',
+  )
+
+  // 收缩要显著缩小"1 个样本"的区分度
+  const oneBad = buildInsight([session({ rom_deg: 27 })], [], NOW)
+  const spread = one.score! - oneBad.score!
+  check(
+    '1 个样本的区分度被压到 30 分以内',
+    spread < 30,
+    `做满 ${one.score} vs 三成 ${oneBad.score}，差 ${spread} 分`,
+  )
+
+  check(
+    'rawScore 保留未收缩的值',
+    one.rawScore !== one.score,
+    `raw ${one.rawScore} → ${one.score}`,
+  )
+}
+
+// ============================================================================
+console.log('\n--- 分数与风险色现在是一致的 ---')
+// ============================================================================
+// 这两者曾经是分开的：分数只反映恢复情况，风险单独用颜色表达。
+// 但实测截图发现那会产生"92 分被涂成橙色"这种自相矛盾的画面 ——
+// 数字和颜色说的不是一回事，而家属只会记住数字。
 //
-// 分数说的是"恢复得怎么样"，风险说的是"有没有危险"。一个患者完全可以
-// 恢复得很好但有一次温度超标。两者要各自上色，不能混用。
+// 现在安全事件直接扣分，两个轴合并成一个：**分数已经把安全算进去了**。
+// 颜色仍从分数推出，所以两者必然一致。这条断言就是钉住这一点 ——
+// 哪天有人把安全惩罚拿掉，这里会立刻变红。
 {
   const perfect = [0, 1, 2, 3, 4].map((n) =>
     session({ rom_deg: 90, started_at: daysAgo(n) }),
   )
 
-  const clean = buildInsight(perfect, [], NOW)
-  check('没有预警时两个色一致', clean.band === clean.scoreBand, `${clean.band} / ${clean.scoreBand}`)
+  const cases: [string, Alert[], RiskBand][] = [
+    ['无预警', [], 'green'],
+    ['一般预警', [alert({ severity: 'warning' })], 'yellow'],
+    ['严重预警', [alert({ severity: 'critical' })], 'red'],
+  ]
 
-  const warned = buildInsight(perfect, [alert({ severity: 'warning' })], NOW)
-  check('有温度提醒时风险色变黄', warned.band === 'yellow', warned.band)
-  check(
-    '但评分色仍是绿的（92 分不该被涂成橙色）',
-    warned.scoreBand === 'green',
-    `score=${warned.score} scoreBand=${warned.scoreBand}`,
-  )
+  for (const [label, alerts, want] of cases) {
+    const ins = buildInsight(perfect, alerts, NOW)
+    check(
+      `${label}：评分色与风险色一致（${ins.score} 分）`,
+      ins.scoreBand === ins.band,
+      `${ins.scoreBand} / ${ins.band}`,
+    )
+    expectBand(`${label}：等级符合预期`, ins, want)
+  }
 
-  const critical = buildInsight(perfect, [alert({ severity: 'critical' })], NOW)
-  check('严重预警时风险色变红', critical.band === 'red', critical.band)
-  check('评分色不跟着变', critical.scoreBand === 'green', critical.scoreBand)
-
-  // 反过来：分数低但没预警，评分色要报红
+  // 分数低但没预警 → 也要报红
   const poor = buildInsight([session({ rom_deg: 9, started_at: daysAgo(0) })], [], NOW)
-  check('分数低于 60 → 评分色报红', poor.scoreBand === 'red', `${poor.score} / ${poor.scoreBand}`)
+  check('分数低于 60 → 报红', poor.scoreBand === 'red', `${poor.score} / ${poor.scoreBand}`)
 
   // 没有分数时不该出现警告色 —— "还没开始"不是"需要注意"
   const empty = buildInsight([], [], NOW)
-  check('没有分数时评分色不为红', empty.scoreBand !== 'red', empty.scoreBand)
+  check('没有分数时不为红', empty.scoreBand !== 'red', empty.scoreBand)
 }
 
-// ============================================================================
 console.log('\n--- 预警要说明处理状态 ---')
 // ============================================================================
 // 原先只在有未处理项时才写"（尚未处理）"，导致已处理的预警看起来

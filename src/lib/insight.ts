@@ -27,42 +27,34 @@
 // ============================================================================
 
 import { REHAB_EXERCISES, metricFor, targetFor } from './assessment.ts'
-import type { ExerciseName } from './assessment.ts'
+import type { AssessMetric, ExerciseName } from './assessment.ts'
+import {
+  BASELINE_DAYS,
+  MIN_BASELINE_SESSIONS,
+  NEUTRAL_SCORE,
+  PROGRESS_FULL_SWING,
+  PROGRESS_NEUTRAL,
+  RECOMMENDED_DAYS_PER_WEEK,
+  SAFETY_PENALTY,
+  SCORE_LEVELS,
+  STABILITY_CV_LIMIT,
+  STABILITY_FAIR_CV,
+  STABILITY_GOOD_CV,
+  STABILITY_NEUTRAL,
+  SUFFICIENT_SESSIONS,
+  WEIGHTS,
+  WINDOW_DAYS,
+} from './scoreConfig.ts'
+import type { ScoreLevel } from './scoreConfig.ts'
 import type { Alert, RehabSession } from '@/types'
 
 // ---------------------------------------------------------------------------
 // 时间窗口
 // ---------------------------------------------------------------------------
+// 窗口长度、四项权重、各种阈值全部在 scoreConfig.ts 里 —— 那些是**该由
+// 康复科核定**的数字，不该混在算法实现里。这里只留推导出来的常量。
 
 const DAY_MS = 86_400_000
-
-/** 本周：最近 7 天。评分看的是这一段 */
-const WINDOW_DAYS = 7
-
-/**
- * 基线：本周之前的那 14 天。
- *
- * 取 14 天是为了让"进步"有个稍微稳定的参照。只取 7 天的话，
- * 上周恰好练得少就会让本周显得进步神速，反过来也一样。
- */
-const BASELINE_DAYS = 14
-
-/**
- * 认为基线"够用"的最少会话数。
- *
- * 少于这个数就不给进步度打分，而是取中性值 —— 用两三次记录算出来的
- * "进步 300%" 只会误导人，不如老实说"数据还不够"。
- */
-const MIN_BASELINE_SESSIONS = 3
-
-/**
- * 康复方案建议的每周训练天数。
- *
- * ⚠️ 这个值按常见膝关节术后康复方案拟定，**真实产品里应该按患者个体
- *    设定**（术后不同阶段的推荐频率不一样）。这里没有患者-方案表，
- *    先用一个统一值，团队应按实际方案核定。
- */
-const RECOMMENDED_DAYS_PER_WEEK = 5
 
 /** 把时间归到当天 0 点（本地时区） */
 function startOfDay(d: Date): Date {
@@ -139,6 +131,23 @@ export interface Insight {
   /** 0~100 的整数。没有数据时为 null */
   score: number | null
   /**
+   * **调整前**的加权分。
+   *
+   * 留着它是为了把调整讲清楚：界面上要说"本周有安全事件，评分已下调
+   * （原 85 分）"。只给最终分的话，家属没法判断下调了多少。
+   * 没有调整时与 score 相同。
+   */
+  rawScore: number | null
+  /** 档位。比颜色细一档，主要作用是**解释**分数意味着什么 */
+  level: ScoreLevel
+  /**
+   * 分数经过了哪些调整。
+   *
+   * 空数组表示没调整过。有内容时必须展示出来 —— 悄悄改分而不说明
+   * 是这个界面最不能做的事。
+   */
+  adjustments: string[]
+  /**
    * 风险等级。由「预警事件」与「评分」合成，用于卡片与提示条。
    *
    * ⚠️ 不要拿它给**评分数字**上色，两者是不同的轴：
@@ -174,30 +183,59 @@ export interface Insight {
 // 一、达标度
 // ---------------------------------------------------------------------------
 
-/**
- * 一次训练相对它的目标完成了多少（0~1）。
- *
- * ⚠️ **静力动作（靠墙静蹲）不计入**。
- *
- * 它的目标 55° 指的是「保持角度」，而 rehab_sessions 表里只存了 rom_deg
- * （活动范围）。靠墙静蹲的活动范围天然只有 5~10°，拿它去比 55 会得出
- * 接近 0 的完成度，把总分拖垮 —— 而患者其实做得完全正确。
- *
- * 这与 analysis.ts 里 summarize() 的处理保持一致：那里同样跳过静力动作。
- * 根治的办法是给表加一列 hold_deg，前端这两处再改成读它。
- */
-function completionOf(session: RehabSession): number | null {
-  if (session.exercise === '靠墙静蹲') return null
-  if (typeof session.rom_deg !== 'number') return null
+/** 一次训练相对它的目标完成了多少 */
+interface Completion {
+  /** 0~1 的完成度，已封顶 */
+  ratio: number
+  /** 判定用的实测值（动态动作是活动范围，静力动作是保持角度） */
+  actual: number
+  /** 判定用的是哪个量 */
+  metric: AssessMetric
+  /** 该动作的康复目标 */
+  target: number
+}
 
+/**
+ * 算一次训练相对它自己的目标完成了多少。
+ *
+ * 【判定指标按动作类型分】
+ *   动态屈伸（坐位伸膝等）→ 看**关节活动范围**（行程）
+ *   静力维持（靠墙静蹲）  → 看**保持角度**
+ *
+ * ⚠️ 这两者不能混。靠墙静蹲的活动范围天然只有 5~10°（只有姿势微调），
+ *    拿它去比 55° 的目标会得出接近 0 的完成度，把做得完全正确的患者
+ *    判成 0 分。
+ *
+ *    早先表里只存了 rom_deg，所以那版**整个跳过了静力动作** ——
+ *    等于这类动作在评分里完全不存在。给 rehab_sessions 加了 hold_deg
+ *    之后才算真正接上（迁移见 20260922090000_add_hold_deg）。
+ *
+ *    老记录没有 hold_deg（那列是后加的），这时返回 null 而不是拿
+ *    rom_deg 去硬凑 —— 宁可少算，也不要算错。
+ */
+function completionOf(session: RehabSession): Completion | null {
   const exercise = session.exercise as ExerciseName
   if (!REHAB_EXERCISES.includes(exercise)) return null
-  if (metricFor(exercise) !== 'rom') return null
 
   const target = targetFor(exercise)
   if (target <= 0) return null
 
-  return clamp01(session.rom_deg / target)
+  const metric = metricFor(exercise)
+
+  if (metric === 'hold') {
+    const h = session.hold_deg
+    if (typeof h !== 'number') return null
+    return { ratio: clamp01(h / target), actual: h, metric, target }
+  }
+
+  const rom = session.rom_deg
+  if (typeof rom !== 'number') return null
+  return { ratio: clamp01(rom / target), actual: rom, metric, target }
+}
+
+/** 取完成度，只要比值。绝大多数地方只关心这个 */
+function ratioOf(session: RehabSession): number | null {
+  return completionOf(session)?.ratio ?? null
 }
 
 // ---------------------------------------------------------------------------
@@ -211,33 +249,32 @@ interface PartInput {
 }
 
 function targetPart(input: PartInput): ScorePart {
-  const ratios = input.week
-    .map(completionOf)
-    .filter((r): r is number => r !== null)
+  const ratios = input.week.map(ratioOf).filter((r): r is number => r !== null)
 
   if (!ratios.length) {
     return {
       key: 'target',
       label: '动作达标',
       value: 0,
-      weight: 0.4,
-      detail: '本周没有可判定的动态动作记录（静力动作不参与达标判定）',
+      weight: WEIGHTS.target,
+      detail: '本周还没有可用于判定的训练记录',
     }
   }
 
   const value = mean(ratios)
   const pct = Math.round(value * 100)
 
-  // 找出做得最差的那个动作，具体说是谁比"本周完成 73%"有用得多
+  // 找出做得最差的那个动作。具体说是谁，比"本周完成 73%"有用得多
   const worst = weakestExercise(input.week)
 
   return {
     key: 'target',
     label: '动作达标',
     value,
-    weight: 0.4,
+    weight: WEIGHTS.target,
     detail: worst
-      ? `本周达到康复目标的 ${pct}%，其中「${worst.exercise}」差距最大（${worst.actual}° / 目标 ${worst.target}°）`
+      ? `本周达到康复目标的 ${pct}%，其中「${worst.exercise}」差距最大` +
+        `（${Math.round(worst.actual)}° / 目标 ${worst.target}°）`
       : `本周达到康复目标的 ${pct}%`,
   }
 }
@@ -249,15 +286,15 @@ function weakestExercise(
   let worst: { exercise: string; actual: number; target: number; ratio: number } | null =
     null
 
-  for (const s of week) {
-    const ratio = completionOf(s)
-    if (ratio === null) continue
-    if (!worst || ratio < worst.ratio) {
+  for (const c of week) {
+    const done = completionOf(c)
+    if (!done) continue
+    if (!worst || done.ratio < worst.ratio) {
       worst = {
-        exercise: s.exercise,
-        actual: Math.round(s.rom_deg ?? 0),
-        target: targetFor(s.exercise as ExerciseName),
-        ratio,
+        exercise: c.exercise,
+        actual: done.actual,
+        target: done.target,
+        ratio: done.ratio,
       }
     }
   }
@@ -268,12 +305,8 @@ function weakestExercise(
 }
 
 function progressPart(input: PartInput): ScorePart {
-  const weekRatios = input.week
-    .map(completionOf)
-    .filter((r): r is number => r !== null)
-  const baseRatios = input.baseline
-    .map(completionOf)
-    .filter((r): r is number => r !== null)
+  const weekRatios = input.week.map(ratioOf).filter((r): r is number => r !== null)
+  const baseRatios = input.baseline.map(ratioOf).filter((r): r is number => r !== null)
 
   const hasBaseline = input.baseline.length >= MIN_BASELINE_SESSIONS
 
@@ -281,8 +314,8 @@ function progressPart(input: PartInput): ScorePart {
     return {
       key: 'progress',
       label: '进步情况',
-      value: 0.5,
-      weight: 0.3,
+      value: PROGRESS_NEUTRAL,
+      weight: WEIGHTS.progress,
       detail: hasBaseline
         ? '本周还没有可比较的记录'
         : `历史记录还不够（需要 ${MIN_BASELINE_SESSIONS} 次以上），暂时按"持平"计分`,
@@ -295,10 +328,9 @@ function progressPart(input: PartInput): ScorePart {
   // 那本周任何进展都是改善，直接给满
   const change = before > 0 ? (now - before) / before : now > 0 ? 1 : 0
 
-  // 变化 ±20% 分别对应满分和零分，0% 对应中间值。
-  // 之所以不用"正比"映射，是因为康复本来就有平台期，
-  // 原地踏步不该被判成不及格
-  const value = clamp01(0.5 + change * 2.5)
+  // 变化 ±PROGRESS_FULL_SWING 分别对应满分和零分，0 对应中间值。
+  // 不按正比映射，是因为康复本来就有平台期，原地踏步不该被判成不及格。
+  const value = clamp01(PROGRESS_NEUTRAL + (change / PROGRESS_FULL_SWING) * (1 - PROGRESS_NEUTRAL))
 
   const pct = Math.round(change * 100)
   const dir = pct > 0 ? '提升' : pct < 0 ? '下降' : '持平'
@@ -307,7 +339,7 @@ function progressPart(input: PartInput): ScorePart {
     key: 'progress',
     label: '进步情况',
     value,
-    weight: 0.3,
+    weight: WEIGHTS.progress,
     detail:
       pct === 0
         ? '和之前两周相比基本持平'
@@ -316,37 +348,38 @@ function progressPart(input: PartInput): ScorePart {
 }
 
 function stabilityPart(input: PartInput): ScorePart {
-  const ratios = input.week
-    .map(completionOf)
-    .filter((r): r is number => r !== null)
+  const ratios = input.week.map(ratioOf).filter((r): r is number => r !== null)
 
   if (ratios.length < 2) {
     return {
       key: 'stability',
       label: '动作稳定',
-      value: 0.5,
-      weight: 0.15,
+      value: STABILITY_NEUTRAL,
+      weight: WEIGHTS.stability,
       detail: '本周记录太少，还看不出动作是否稳定',
     }
   }
 
   const m = mean(ratios)
   // 变异系数：标准差 ÷ 均值。用它而不是光看标准差，是因为
-  // 不同动作的完成度尺度不同，只有相对波动才可比
+  // 不同动作的完成度尺度不同，只有相对波动才可比。
+  //
+  // ⚠️ 这一项有个已知的失真：完成度被 clamp 到 [0,1]，接近满分时
+  //    天花板会把波动压小，于是"做得很好"看起来比"做得中等"更稳定。
+  //    彻底解决要改用未封顶的原始角度算波动，留给后面的迭代。
   const cv = m > 0 ? stdDev(ratios) / m : 0
 
-  // CV 到 0.3 就算很不稳定了。这个阈值是经验值，康复科可调
-  const value = clamp01(1 - cv / 0.3)
+  const value = clamp01(1 - cv / STABILITY_CV_LIMIT)
 
   return {
     key: 'stability',
     label: '动作稳定',
     value,
-    weight: 0.15,
+    weight: WEIGHTS.stability,
     detail:
-      cv < 0.1
+      cv < STABILITY_GOOD_CV
         ? '每次动作幅度都很接近，发挥稳定'
-        : cv < 0.2
+        : cv < STABILITY_FAIR_CV
           ? '动作幅度偶有起伏，总体可控'
           : '动作幅度忽大忽小，建议放慢速度、组间多休息',
   }
@@ -359,7 +392,7 @@ function adherencePart(input: PartInput): ScorePart {
     key: 'adherence',
     label: '训练坚持',
     value,
-    weight: 0.15,
+    weight: WEIGHTS.adherence,
     detail: `本周训练了 ${input.weekDays} 天，建议每周 ${RECOMMENDED_DAYS_PER_WEEK} 天`,
   }
 }
@@ -396,6 +429,72 @@ function scoreBandFor(score: number): RiskBand {
   if (score < 60) return 'red'
   if (score < 80) return 'yellow'
   return 'green'
+}
+
+/** 分数对应的档位。分档表在 scoreConfig.ts 里，从高到低第一个命中的即结果 */
+function levelFor(score: number): ScoreLevel {
+  const hit = SCORE_LEVELS.find((l) => score >= l.min) ?? SCORE_LEVELS.at(-1)!
+  return { key: hit.key, label: hit.label, detail: hit.detail }
+}
+
+/**
+ * 本周最严重的预警等级。没有预警时返回 null。
+ *
+ * 按**最严重的**那一条算，不累加 —— 3 次一般提醒不等于比 1 次严重 3 倍。
+ * 次数会写在提示文案里，不藏。
+ */
+function worstSeverity(alerts: Alert[]): Alert['severity'] | null {
+  let worst: Alert['severity'] | null = null
+  for (const a of alerts) {
+    if (worst === null || severityRank(a.severity) > severityRank(worst)) {
+      worst = a.severity
+    }
+  }
+  return worst
+}
+
+/**
+ * 把加权分调整成最终分，并记录调了什么。
+ *
+ * 两步，顺序不能反：
+ *
+ *   ① 数据充分度收缩 —— 样本少时把分数拉向中性值。
+ *      放在前面，是因为"测出来多少分"本来就该先按可信度打折。
+ *
+ *   ② 安全下调 —— 用乘数而不是扣分项。
+ *      安全事件的影响**不该是线性的**，它不能被"动作做得好"补回来。
+ *      放在最后，保证它永远足额生效，不会被收缩稀释。
+ */
+function adjustScore(
+  rawScore: number,
+  weekSessions: number,
+  weekAlerts: Alert[],
+): { score: number; adjustments: string[] } {
+  const adjustments: string[] = []
+  let score = rawScore
+
+  // ① 数据充分度
+  const sufficiency = clamp01(weekSessions / SUFFICIENT_SESSIONS)
+  if (sufficiency < 1) {
+    score = sufficiency * score + (1 - sufficiency) * NEUTRAL_SCORE
+    adjustments.push(
+      `本周只有 ${weekSessions} 次记录，数据偏少，评分已向中间值收敛`,
+    )
+  }
+
+  // ② 安全下调
+  const worst = worstSeverity(weekAlerts)
+  if (worst === 'critical' || worst === 'warning') {
+    const n = weekAlerts.filter((a) => a.severity === worst).length
+    score *= SAFETY_PENALTY[worst]
+    adjustments.push(
+      worst === 'critical'
+        ? `本周有 ${n} 次严重安全事件（温度超过安全阈值或信号中断），评分已下调`
+        : `本周有 ${n} 次安全提醒，评分已下调`,
+    )
+  }
+
+  return { score: Math.round(score), adjustments }
 }
 
 // ---------------------------------------------------------------------------
@@ -676,6 +775,9 @@ export function buildInsight(
   if (!sessions.length) {
     return {
       score: null,
+      rawScore: null,
+      level: levelFor(0),
+      adjustments: [],
       band: 'yellow',
       // 没有分数就谈不上等级。给绿而不是黄：这不是"需要注意"，
       // 只是"还没开始"，家属第一次打开不该看到一个警告色
@@ -692,11 +794,17 @@ export function buildInsight(
   }
 
   const weighted = parts.reduce((sum, p) => sum + p.value * p.weight, 0)
-  const score = Math.round(weighted * 100)
+  const rawScore = Math.round(weighted * 100)
+  const { score, adjustments } = adjustScore(rawScore, week.length, weekAlerts)
+  // 风险等级用**调整后**的分数：一个被安全事件压到 51 分的患者，
+  // 不该因为原始加权分是 85 就显示绿灯
   const band = bandFor(score, weekAlerts)
 
   return {
     score,
+    rawScore,
+    level: levelFor(score),
+    adjustments,
     band,
     scoreBand: scoreBandFor(score),
     headline: headlineFor(score, parts, stats),
@@ -710,30 +818,27 @@ export function buildInsight(
   }
 }
 
-/** 评分下面那句解释。要具体，不要"表现良好"这种废话 */
+/**
+ * 评分下面那句解释。
+ *
+ * 只给**具体证据**，不复述定性评价 —— "恢复情况良好"这类话已经由
+ * level 那一行说了（「恢复良好 · 保持得很好」），再说一遍是重复。
+ * 这里回答的是"凭什么给这个分"：提升了多少，或者达标到几成。
+ */
 function headlineFor(
-  score: number,
+  _score: number,
   parts: ScorePart[],
   stats: Insight['stats'],
 ): string {
   const progress = parts.find((p) => p.key === 'progress')!
   const target = parts.find((p) => p.key === 'target')!
 
-  const overall =
-    score >= 85
-      ? '恢复情况很好'
-      : score >= 70
-        ? '恢复情况良好'
-        : score >= 60
-          ? '恢复情况一般'
-          : '需要重点关注'
-
-  // 有明确进步时，把进步幅度说出来 —— 这是家属最想看到的数字
+  // 有明确进步时优先说幅度 —— 这是家属最想看到的数字
   if (stats.hasBaseline && progress.value > 0.6) {
     const m = /提升 (\d+)%/.exec(progress.detail)
-    if (m) return `本周${overall}，动作完成度比之前两周提升 ${m[1]}%`
+    if (m) return `动作完成度比之前两周提升 ${m[1]}%`
   }
 
   const pct = Math.round(target.value * 100)
-  return `本周${overall}，动作完成度达到康复目标的 ${pct}%`
+  return `动作完成度达到康复目标的 ${pct}%`
 }

@@ -82,6 +82,12 @@ function makeSession(
     duration_s: result.durationS,
     rep_count: 8,
     rom_deg: Number((result.romMax * scale).toFixed(2)),
+    // 静力动作要存保持角度。与 rom_deg 一样跟着康复进程放大 ——
+    // 静蹲的"进步"就体现在能保持在更大的屈曲角上
+    hold_deg:
+      result.metric === 'hold'
+        ? Number((result.holdAngle * scale).toFixed(2))
+        : null,
     temp_c: Number((result.tempMax + (progress - 0.5) * 1.5).toFixed(2)),
     rms_mv: Number(result.rmsAvg.toFixed(4)),
     confidence: Number((0.86 + progress * 0.1).toFixed(3)),

@@ -234,8 +234,20 @@ export type RehabSession = {
   duration_s: number | null
 
   rep_count: number | null
-  /** 关节活动度（度） */
+  /** 关节活动度（度）。动态屈伸类动作的判定指标 */
   rom_deg: number | null
+  /**
+   * 静力动作的**保持角度**（度），动态动作为 null。
+   *
+   * 靠墙静蹲这类静力动作不能用 rom_deg 判定达标 —— 它的活动范围
+   * 天然只有 5~10°，而目标是保持 55°。详见 lib/assessment.ts 的
+   * AssessMetric 与迁移 9 的说明。
+   *
+   * ⚠️ 可空还有一层原因：这列是后加的，**历史记录没有值**，而且无法
+   *    还原（当时只在内存里算过，没落库）。读取方一律按"跳过"处理，
+   *    不要当成 0。
+   */
+  hold_deg: number | null
   /** 该次训练期间的局部皮温峰值（摄氏度） */
   temp_c: number | null
   /** 肌电均方根值（mV）—— 肌肉激活强度。迁移 4 新增 */

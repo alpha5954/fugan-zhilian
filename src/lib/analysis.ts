@@ -7,7 +7,7 @@
 // 缺日期、跨时区）用眼睛看代码是看不出来的。
 // ============================================================================
 
-import { REHAB_EXERCISES, targetFor } from './assessment.ts'
+import { REHAB_EXERCISES, metricFor, targetFor } from './assessment.ts'
 import { formatDate } from './format.ts'
 import type { RehabSession } from '@/types'
 
@@ -235,12 +235,23 @@ export function summarize(sessions: RehabSession[]): AnalysisSummary {
 
   // 达标判定必须按动作取目标值 —— 用统一目标会得出完全错误的达标率
   const onTargetCount = sessions.filter((s) => {
-    if (typeof s.rom_deg !== 'number') return false
-    const target = targetFor(s.exercise as (typeof REHAB_EXERCISES)[number])
-    // 静力动作的活动度本就很小，不能用活动度判定达标；
-    // 这里没有保存保持角度，所以静力动作一律不计入达标统计
-    if (s.exercise === '靠墙静蹲') return false
-    return s.rom_deg >= target
+    const exercise = s.exercise as (typeof REHAB_EXERCISES)[number]
+    if (!REHAB_EXERCISES.includes(exercise)) return false
+
+    const target = targetFor(exercise)
+
+    // 判定指标也按动作类型取：动态动作看活动范围，静力动作看保持角度。
+    //
+    // 这两者不能混 —— 靠墙静蹲的活动范围天然只有 5~10°（只有姿势微调），
+    // 拿它去比 55° 的目标会把做得完全正确的患者判成未达标。
+    //
+    // 在迁移 9 加上 hold_deg 之前，这里只能整个跳过静力动作，
+    // 代价是那类动作在达标统计里完全不存在。现在接上了。
+    // 老记录没有 hold_deg，取不到值时跳过 —— 不拿 rom_deg 去硬凑。
+    const value = metricFor(exercise) === 'hold' ? s.hold_deg : s.rom_deg
+    if (typeof value !== 'number') return false
+
+    return value >= target
   }).length
 
   const confidences = pluck(sessions, 'confidence')
