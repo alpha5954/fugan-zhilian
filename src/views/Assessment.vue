@@ -332,6 +332,69 @@ watch(() => care.viewingPatientId, loadHistory)
 
     <!-- ================= 右栏：结果 ================= -->
     <div class="assess__main">
+      <!-- 评估结论放在**最前面**。
+           它原本排在右栏最后（页面的 82% 处，要滚到底才看得到）——
+           而这是这一页最重要的产出。人打开评估页想知道的是"这次做得怎么样"，
+           不是先看四张图。依据排在结论后面，顺序才是「先结论、后依据」 -->
+      <!-- 评估结论 -->
+      <section class="panel">
+        <header class="panel__head">
+          <h2 class="panel__title">评估结论</h2>
+          <span class="panel__unit">依据本次数据自动生成</span>
+        </header>
+
+        <div v-if="result" class="findings">
+          <article
+            v-for="f in visibleFindings"
+            :key="f.key"
+            class="finding"
+            :class="`finding--${f.band}`"
+          >
+            <p class="finding__label">
+              <RiskBadge :band="f.band" dot size="sm" />
+              <span>{{ f.label }}</span>
+            </p>
+            <p class="finding__evidence">{{ f.evidence }}</p>
+            <p class="finding__action">{{ f.action }}</p>
+          </article>
+
+          <!-- 其余折起来。一次列五条并列的结论，用户会全部略过 -->
+          <template v-if="hiddenFindings.length">
+            <button
+              type="button"
+              class="findings__more"
+              :aria-expanded="findingsOpen"
+              @click="findingsOpen = !findingsOpen"
+            >
+              {{ findingsOpen ? '收起' : `另有 ${hiddenFindings.length} 条` }}
+            </button>
+
+            <template v-if="findingsOpen">
+              <article
+                v-for="f in hiddenFindings"
+                :key="f.key"
+                class="finding"
+                :class="`finding--${f.band}`"
+              >
+                <p class="finding__label">
+                  <RiskBadge :band="f.band" dot size="sm" />
+                  <span>{{ f.label }}</span>
+                </p>
+                <p class="finding__evidence">{{ f.evidence }}</p>
+                <p class="finding__action">{{ f.action }}</p>
+              </article>
+            </template>
+          </template>
+        </div>
+
+        <p class="panel__note">
+          结论由基于规则的评估逻辑生成（活动度达标判定、肌电疲劳趋势、
+          相位分析、识别置信度阈值），非大模型输出。
+          <strong>它是训练过程中的参考，不是医学诊断</strong> ——
+          措辞只描述测量结果与功能状态，不给疾病判断。持续异常请咨询康复治疗师。
+        </p>
+      </section>
+
       <!-- 识别结果 -->
       <section class="panel">
         <h2 class="panel__title">动作识别结果</h2>
@@ -532,64 +595,6 @@ watch(() => care.viewingPatientId, loadHistory)
         />
       </section>
 
-      <!-- 评估结论 -->
-      <section class="panel">
-        <header class="panel__head">
-          <h2 class="panel__title">评估结论</h2>
-          <span class="panel__unit">依据本次数据自动生成</span>
-        </header>
-
-        <div v-if="result" class="findings">
-          <article
-            v-for="f in visibleFindings"
-            :key="f.key"
-            class="finding"
-            :class="`finding--${f.band}`"
-          >
-            <p class="finding__label">
-              <RiskBadge :band="f.band" dot size="sm" />
-              <span>{{ f.label }}</span>
-            </p>
-            <p class="finding__evidence">{{ f.evidence }}</p>
-            <p class="finding__action">{{ f.action }}</p>
-          </article>
-
-          <!-- 其余折起来。一次列五条并列的结论，用户会全部略过 -->
-          <template v-if="hiddenFindings.length">
-            <button
-              type="button"
-              class="findings__more"
-              :aria-expanded="findingsOpen"
-              @click="findingsOpen = !findingsOpen"
-            >
-              {{ findingsOpen ? '收起' : `另有 ${hiddenFindings.length} 条` }}
-            </button>
-
-            <template v-if="findingsOpen">
-              <article
-                v-for="f in hiddenFindings"
-                :key="f.key"
-                class="finding"
-                :class="`finding--${f.band}`"
-              >
-                <p class="finding__label">
-                  <RiskBadge :band="f.band" dot size="sm" />
-                  <span>{{ f.label }}</span>
-                </p>
-                <p class="finding__evidence">{{ f.evidence }}</p>
-                <p class="finding__action">{{ f.action }}</p>
-              </article>
-            </template>
-          </template>
-        </div>
-
-        <p class="panel__note">
-          结论由基于规则的评估逻辑生成（活动度达标判定、肌电疲劳趋势、
-          相位分析、识别置信度阈值），非大模型输出。
-          <strong>它是训练过程中的参考，不是医学诊断</strong> ——
-          措辞只描述测量结果与功能状态，不给疾病判断。持续异常请咨询康复治疗师。
-        </p>
-      </section>
     </div>
   </div>
 </template>
