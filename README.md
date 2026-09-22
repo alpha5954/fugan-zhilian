@@ -259,8 +259,8 @@ supabase/
 
 | 文件 | 用途 |
 |---|---|
-| `supabase/verify_migrations.sql` | **精简版**，6 项。只回答"迁移都应用了没"，适合快速粘贴 |
-| `supabase/verify_summary.sql` | **完整版**，18 项。含策略、触发器、列级授权等明细，迁移后完整核对用 |
+| `supabase/verify_migrations.sql` | **精简版**，13 项。只回答"迁移都应用了没"，适合快速粘贴 |
+| `supabase/verify_summary.sql` | **完整版**，20 项。含策略、触发器、列级授权等明细，迁移后完整核对用 |
 
 > ⚠️ `verify_summary.sql` 有 222 行，粘贴时容易只选中一部分，导致 `syntax error at end of input`。日常检查用精简版。
 

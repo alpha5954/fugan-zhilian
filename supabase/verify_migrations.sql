@@ -1,5 +1,5 @@
 -- 迁移是否都已应用 —— 精简版，专为快速粘贴
--- 完整核对（18 项，含策略、触发器、授权明细）见 verify_summary.sql
+-- 完整核对（含策略、触发器、授权明细）见 verify_summary.sql
 select * from (
   select 1 as 项, '6 张表已建且启用 RLS' as 检查,
          case when (select count(*) from pg_class c
@@ -58,5 +58,17 @@ select * from (
          case when (select count(*) from information_schema.routine_privileges
                     where routine_schema = 'public' and routine_name = 'get_care_counterparts'
                       and grantee = 'authenticated' and privilege_type = 'EXECUTE') = 1
+              then 'PASS' else 'FAIL' end
+  union all select 12, '迁移9: rehab_sessions.hold_deg numeric(5,2) 且可空',
+         case when exists (select 1 from information_schema.columns
+                           where table_schema = 'public' and table_name = 'rehab_sessions'
+                             and column_name = 'hold_deg' and data_type = 'numeric'
+                             and numeric_precision = 5 and numeric_scale = 2
+                             and is_nullable = 'YES')
+              then 'PASS' else 'FAIL' end
+  union all select 13, '迁移9: hold_deg 部分索引已建',
+         case when exists (select 1 from pg_indexes
+                           where schemaname = 'public'
+                             and indexname = 'rehab_sessions_hold_idx')
               then 'PASS' else 'FAIL' end
 ) t order by 项;

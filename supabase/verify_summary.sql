@@ -214,6 +214,23 @@ select 18, 'claim_device 对 anon 不可调用（防序列号探测）',
                   where routine_schema = 'public' and routine_name = 'claim_device'
                     and grantee = 'anon' and privilege_type = 'EXECUTE') = 0
             then 'PASS' else 'FAIL' end,
+       '—'
+union all
+-- 迁移 9：静力动作的保持角度。缺了它靠墙静蹲不参与达标判定与恢复评分
+select 19, 'rehab_sessions.hold_deg 存在且为 numeric(5,2) 可空',
+       case when exists (select 1 from information_schema.columns
+                         where table_schema = 'public' and table_name = 'rehab_sessions'
+                           and column_name = 'hold_deg' and data_type = 'numeric'
+                           and numeric_precision = 5 and numeric_scale = 2
+                           and is_nullable = 'YES')
+            then 'PASS' else 'FAIL' end,
+       '—'
+union all
+select 20, 'hold_deg 部分索引已建',
+       case when exists (select 1 from pg_indexes
+                         where schemaname = 'public'
+                           and indexname = 'rehab_sessions_hold_idx')
+            then 'PASS' else 'FAIL' end,
        '—';
 
 -- ============================================================================
