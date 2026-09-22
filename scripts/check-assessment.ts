@@ -189,40 +189,6 @@ check('rom_deg 保留两位小数后仍是有限数',
   Number.isFinite(Number(sample.romMax.toFixed(2))),
   `${Number(sample.romMax.toFixed(2))}°`)
 
-// ---------------------------------------------------------------- 建议
-console.log()
-console.log('='.repeat(70))
-console.log('6. 评估建议')
-console.log('='.repeat(70))
-
-for (const a of sample.advice) {
-  console.log(`  [${a.level}] ${a.title}`)
-  console.log(`        ${a.detail}`)
-}
-
-check('生成了建议条目', sample.advice.length >= 3, `${sample.advice.length} 条`)
-check('建议包含动作规范性与活动度两类',
-  sample.advice.some((a) => a.title.includes('动作')) &&
-  sample.advice.some((a) => a.title.includes('活动度')))
-check('每条建议都有标题和正文',
-  sample.advice.every((a) => a.title.length > 0 && a.detail.length > 0))
-// 达标结论必须与该动作自己的目标一致，而不是某个全局值
-check('达标结论与「该动作的」目标一致',
-  sample.metricValue >= sample.target
-    ? sample.advice.some((a) => a.title.includes('达到目标'))
-    : sample.advice.some((a) => a.title.includes('未达目标')),
-  `本次 ${sample.metricValue.toFixed(1)}° vs 目标 ${sample.target}°`)
-
-// 静力动作必须用「保持角度」判定，文案里也要出现这个词
-const wallSit = generateSession('靠墙静蹲', 4)
-const holdAdvice = wallSit.advice.find((a) => a.title.includes('保持角度'))
-check('静力动作的判定文案用的是「保持角度」而非「关节活动度」',
-  Boolean(holdAdvice), holdAdvice?.title ?? '(未生成)')
-check('静力动作的判定不会拿活动范围去比目标值（那样会误报未达标）',
-  wallSit.advice.every((a) => !a.title.includes('关节活动度')),
-  `靠墙静蹲：保持 ${wallSit.holdAngle.toFixed(1)}° / 目标 ${wallSit.target}°，活动范围仅 ${wallSit.romMax.toFixed(1)}°`)
-
-
 // ---------------------------------------------------------------- 肌电-运动学融合
 console.log()
 console.log('='.repeat(70))
@@ -245,8 +211,35 @@ check('适用相位分析', phase.applicable)
 //
 // 这个断言真正要证的是「峰值落在关节活动范围的中间段（向心期）」——
 // 若实现坏了（比如取成角度最小值 5° 或最大值 100°），一定会被抓住。
-check('★ 峰值角度落在活动范围中段（真值约 50–53°，向心期）',
-  phase.peakAngle >= 35 && phase.peakAngle <= 70, `${phase.peakAngle}°`)
+// ⚠️ 这条断言改成**跑多次取均值**，而不是判单次结果。
+//
+// 单次峰值角度的标准差实测 7.5°（模拟器的肌电包络本身很宽，折算约 11°，
+// 而每个角度分箱只有几个采样点）。卡在单次上、容差 ±15°，只有 2 个标准差
+// —— 约 5% 的运行会随机失败。这正是这个文件开头警告过的那类 flaky 断言。
+//
+// 改成统计性质之后，它要证的东西没变（估计量无偏、落在向心期中段），
+// 但坏实现（比如取成角度最小值 5° 或最大值 100°）照样会被抓住。
+{
+  const peaks: number[] = []
+  for (let i = 0; i < 20; i++) {
+    const r = generateSession('屈膝滑动', 8)
+    if (r.emgAngle.applicable) peaks.push(r.emgAngle.peakAngle)
+  }
+  const mean = peaks.reduce((a, b) => a + b, 0) / peaks.length
+  const sd = Math.sqrt(
+    peaks.reduce((a, b) => a + (b - mean) ** 2, 0) / peaks.length,
+  )
+  check(
+    '★ 峰值角度落在活动范围中段（20 次均值，真值约 50°）',
+    mean >= 40 && mean <= 65,
+    `均值 ${mean.toFixed(1)}°，标准差 ${sd.toFixed(1)}°`,
+  )
+  check(
+    '★ 峰值角度估计无偏（标准差在 12° 以内）',
+    sd < 12,
+    `标准差 ${sd.toFixed(1)}°`,
+  )
+}
 check('★ 向心/离心比值还原出真值约 2.3（> 1.5 即说明分析有效）',
   phase.ratio > 1.5, phase.ratio.toFixed(2))
 check('向心期与离心期都识别出了曲线',

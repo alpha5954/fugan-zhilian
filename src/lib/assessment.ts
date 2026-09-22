@@ -102,12 +102,6 @@ export interface RepMetrics {
 /** 建议条目的语气 */
 export type AdviceLevel = 'good' | 'warn' | 'info'
 
-export interface Advice {
-  level: AdviceLevel
-  title: string
-  detail: string
-}
-
 /** 一次评估的完整结果 */
 export interface SessionResult {
   durationS: number
@@ -143,8 +137,6 @@ export interface SessionResult {
 
   /** 肌电-关节角度相位分析（命题答题要求点名的「运动学数据融合」） */
   emgAngle: EmgAngleAnalysis
-
-  advice: Advice[]
 }
 
 // ---------------------------------------------------------------------------
@@ -199,113 +191,6 @@ function buildConfidence(
   })
 
   return result
-}
-
-/**
- * 按评估结果生成建议。
- *
- * ⚠️ 这是**基于规则的文本生成**，不是大模型输出。规则来自康复评定的常规
- *    判断逻辑（活动度是否达标、肌电是否随轮次衰减、识别置信度是否偏低）。
- *    对外展示时不要包装成"AI 诊断"，那既不准确也有合规风险。
- *    将来要接真实模型，替换这个函数即可，调用方不用改。
- */
-function buildAdvice(
-  performed: ExerciseName,
-  topConfidence: number,
-  metric: AssessMetric,
-  metricValue: number,
-  target: number,
-  reps: RepMetrics[],
-  tempMax: number,
-): Advice[] {
-  const out: Advice[] = []
-
-  // ---- 动作规范性 ----
-  if (topConfidence >= 0.9) {
-    out.push({
-      level: 'good',
-      title: '动作识别置信度高',
-      detail: `本次动作被判为「${performed}」的置信度为 ${(topConfidence * 100).toFixed(1)}%，动作特征清晰、完成度好。`,
-    })
-  } else if (topConfidence >= 0.8) {
-    out.push({
-      level: 'info',
-      title: '动作特征基本清晰',
-      detail: `置信度 ${(topConfidence * 100).toFixed(1)}%，略低于典型值。若患者感到动作别扭，可放慢节奏、加大动作幅度后重试。`,
-    })
-  } else {
-    out.push({
-      level: 'warn',
-      title: '动作可能不够标准',
-      detail: `置信度仅 ${(topConfidence * 100).toFixed(1)}%，模型难以明确归类。建议治疗师现场确认动作要领，或降低训练强度重新采集。`,
-    })
-  }
-
-  // ---- 达标判定 ----
-  // 指标按动作类型选：动态屈伸看活动范围，静力维持看保持角度。
-  // 两者混用会得出错误结论 —— 靠墙静蹲的活动范围本就很小。
-  const label = metricLabel(metric)
-
-  if (metricValue >= target) {
-    out.push({
-      level: 'good',
-      title: `${label}达到目标`,
-      detail: `本次${label} ${metricValue.toFixed(1)}°，已达到「${performed}」${target}° 的康复目标。可维持当前训练方案。`,
-    })
-  } else {
-    const gap = target - metricValue
-    out.push({
-      level: 'warn',
-      title: `${label}未达目标`,
-      detail:
-        `本次${label} ${metricValue.toFixed(1)}°，距「${performed}」${target}° 的目标还差 ${gap.toFixed(1)}°。` +
-        (metric === 'hold'
-          ? '建议在无痛前提下逐步延长保持时间、加深下蹲角度。'
-          : '建议在无痛范围内逐步增加活动幅度，避免强行牵拉。'),
-    })
-  }
-
-  // ---- 疲劳趋势：看每轮的肌电 RMS 是否持续衰减 ----
-  if (reps.length >= 4) {
-    const firstHalf = reps.slice(0, Math.floor(reps.length / 2))
-    const secondHalf = reps.slice(Math.floor(reps.length / 2))
-    const avg = (xs: RepMetrics[]) => xs.reduce((a, r) => a + r.rms, 0) / xs.length
-
-    const early = avg(firstHalf)
-    const late = avg(secondHalf)
-    const drop = early > 0 ? (early - late) / early : 0
-
-    if (drop > 0.25) {
-      out.push({
-        level: 'warn',
-        title: '存在肌肉疲劳迹象',
-        detail: `后半程肌电强度较前半程下降 ${(drop * 100).toFixed(0)}%。建议缩短单组次数或组间增加休息，避免代偿动作。`,
-      })
-    } else if (drop < -0.2) {
-      out.push({
-        level: 'info',
-        title: '肌电强度逐轮上升',
-        detail: `后半程肌电强度较前半程上升 ${(-drop * 100).toFixed(0)}%，可能是随动作熟练度提升而发力更充分，也可能存在发力过猛。`,
-      })
-    } else {
-      out.push({
-        level: 'good',
-        title: '各组发力稳定',
-        detail: '前后半程肌电强度差异在正常范围内，未观察到明显疲劳或代偿。',
-      })
-    }
-  }
-
-  // ---- 温度 ----
-  if (tempMax >= 45) {
-    out.push({
-      level: 'warn',
-      title: '局部温度偏高',
-      detail: `本次监测到局部皮温最高 ${tempMax.toFixed(1)}°C，已接近或超过 45°C。若同时在进行热敷，请缩短单次时长。`,
-    })
-  }
-
-  return out
 }
 
 /**
@@ -406,15 +291,6 @@ export function generateSession(
     performed,
     waveform,
     emgAngle: buildEmgAnglePhase(samples),
-    advice: buildAdvice(
-      performed,
-      topConfidence,
-      base.metric,
-      metricValue,
-      base.target,
-      reps,
-      tempMax,
-    ),
   }
 }
 

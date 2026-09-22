@@ -14,12 +14,14 @@ import { ElMessage } from 'element-plus'
 import BarChart from '@/components/BarChart.vue'
 import type { BarSeries } from '@/components/BarChart.vue'
 import PhaseChart from '@/components/PhaseChart.vue'
+import RiskBadge from '@/components/RiskBadge.vue'
 import {
   REHAB_EXERCISES,
   generateSession,
   type ExerciseName,
   type SessionResult,
 } from '@/lib/assessment'
+import { buildFindings, topFindings, type Finding } from '@/lib/findings'
 import { formatDuration } from '@/lib/format'
 import { useCareStore } from '@/stores/care'
 import { useDeviceStore } from '@/stores/device'
@@ -130,6 +132,22 @@ const romMarkLines = computed(() => {
 /** 静力动作的活动度图只是参考，标题要说明 */
 const isStaticExercise = computed(() => result.value?.metric === 'hold')
 
+// ---------------------------------------------------------------------------
+// 评估结论
+// ---------------------------------------------------------------------------
+// 一次评估可能产出五六条结论，全列出来等于一条都没说 —— 用户会全部略过。
+// 默认只给最靠前的 3 条（已按红黄绿排好），其余折起来。
+
+const FINDING_LIMIT = 3
+const findingsOpen = ref(false)
+
+const findings = computed<Finding[]>(() =>
+  result.value ? buildFindings(result.value, sessions.sessions) : [],
+)
+
+const visibleFindings = computed(() => topFindings(findings.value, FINDING_LIMIT))
+const hiddenFindings = computed(() => findings.value.slice(FINDING_LIMIT))
+
 /** 四类置信度，降序排列 */
 const confidenceList = computed(() => {
   if (!result.value) return []
@@ -201,9 +219,15 @@ async function save() {
 
 // ---------------------------------------------------------------------------
 
-/** 拉取 ROM 对比用的历史记录。切换查看对象时要重新拉 */
+/**
+ * 拉取历史记录。切换查看对象时要重新拉。
+ *
+ * 两个用途：ROM 对比图只取最近一条，评估结论里的"较以往同动作"要更多 ——
+ * 少于 3 条同动作记录就不给那条结论（见 findings.ts）。
+ * 取 30 条够覆盖几周的同动作样本。
+ */
 async function loadHistory() {
-  await sessions.fetch({ limit: 5, patientId: care.activePatientId })
+  await sessions.fetch({ limit: 30, patientId: care.activePatientId })
 }
 
 onMounted(() => {
@@ -508,26 +532,62 @@ watch(() => care.viewingPatientId, loadHistory)
         />
       </section>
 
-      <!-- 建议 -->
+      <!-- 评估结论 -->
       <section class="panel">
-        <h2 class="panel__title">评估建议</h2>
+        <header class="panel__head">
+          <h2 class="panel__title">评估结论</h2>
+          <span class="panel__unit">依据本次数据自动生成</span>
+        </header>
 
-        <div v-if="result" class="advice">
-          <div
-            v-for="(a, i) in result.advice"
-            :key="i"
-            class="advice__item"
-            :class="`advice__item--${a.level}`"
+        <div v-if="result" class="findings">
+          <article
+            v-for="f in visibleFindings"
+            :key="f.key"
+            class="finding"
+            :class="`finding--${f.band}`"
           >
-            <span class="advice__title">{{ a.title }}</span>
-            <p class="advice__detail">{{ a.detail }}</p>
-          </div>
+            <p class="finding__label">
+              <RiskBadge :band="f.band" dot size="sm" />
+              <span>{{ f.label }}</span>
+            </p>
+            <p class="finding__evidence">{{ f.evidence }}</p>
+            <p class="finding__action">{{ f.action }}</p>
+          </article>
+
+          <!-- 其余折起来。一次列五条并列的结论，用户会全部略过 -->
+          <template v-if="hiddenFindings.length">
+            <button
+              type="button"
+              class="findings__more"
+              :aria-expanded="findingsOpen"
+              @click="findingsOpen = !findingsOpen"
+            >
+              {{ findingsOpen ? '收起' : `另有 ${hiddenFindings.length} 条` }}
+            </button>
+
+            <template v-if="findingsOpen">
+              <article
+                v-for="f in hiddenFindings"
+                :key="f.key"
+                class="finding"
+                :class="`finding--${f.band}`"
+              >
+                <p class="finding__label">
+                  <RiskBadge :band="f.band" dot size="sm" />
+                  <span>{{ f.label }}</span>
+                </p>
+                <p class="finding__evidence">{{ f.evidence }}</p>
+                <p class="finding__action">{{ f.action }}</p>
+              </article>
+            </template>
+          </template>
         </div>
 
         <p class="panel__note">
-          建议由基于规则的评估逻辑生成（活动度达标判定、肌电疲劳趋势、
-          识别置信度阈值），非大模型输出。后续接入模型时替换
-          <code>buildAdvice</code> 即可，界面无需改动。
+          结论由基于规则的评估逻辑生成（活动度达标判定、肌电疲劳趋势、
+          相位分析、识别置信度阈值），非大模型输出。
+          <strong>它是训练过程中的参考，不是医学诊断</strong> ——
+          措辞只描述测量结果与功能状态，不给疾病判断。持续异常请咨询康复治疗师。
         </p>
       </section>
     </div>
@@ -861,44 +921,77 @@ watch(() => care.viewingPatientId, loadHistory)
 }
 
 /* ---------- 建议 ---------- */
-.advice {
+/* ---------- 评估结论 ----------
+   一条结论占一张小卡：**结论 -> 依据 -> 该做什么** 三行。
+   依据（具体数值）压小变灰放在中间 —— 家属读上下两行，
+   医生核对中间那行。这是"结论要简单、依据要完整"的具体做法。 */
+.findings {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.advice__item {
-  padding: 12px 14px;
+.finding {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 11px 14px;
   border-radius: var(--r-sm);
   border-left: 3px solid var(--ink-200);
   background: var(--surface-sunken);
 }
 
-.advice__item--good {
-  border-left-color: var(--ok);
-  background: var(--ok-bg);
+.finding--red {
+  border-left-color: var(--danger);
+  background: var(--danger-bg);
 }
 
-.advice__item--warn {
+.finding--yellow {
   border-left-color: var(--warn);
   background: var(--warn-bg);
 }
 
-.advice__item--info {
-  border-left-color: var(--brand-700);
-  background: var(--info-bg);
+.finding--green {
+  border-left-color: var(--ok);
+  background: var(--ok-bg);
 }
 
-.advice__title {
-  font-size: 13px;
-  font-weight: 600;
+.finding__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
   color: var(--ink-800);
 }
 
-.advice__detail {
-  margin: 4px 0 0;
-  font-size: 13px;
-  line-height: 1.7;
+.finding__evidence {
+  margin: 1px 0 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-base);
+  color: var(--ink-400);
+}
+
+.finding__action {
+  margin: 3px 0 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
   color: var(--ink-600);
+}
+
+.findings__more {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--brand-700);
+  cursor: pointer;
+}
+
+.findings__more:hover {
+  text-decoration: underline;
 }
 </style>
