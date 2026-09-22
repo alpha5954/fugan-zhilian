@@ -185,8 +185,16 @@ async function handleCommand(command: string) {
       <!-- 套错误边界：某个页面渲染期抛异常时，Vue 会卸载整棵子树，
            用户会看到一片白且点不动。边界把它换成一个能看懂的提示
            和"重新加载"入口 -->
+      <!-- 路由切换淡入。
+           ⚠️ 用 mode="out-in" 且时长压得很短（出 80ms / 入 160ms）——
+              不加 out-in 的话新旧两页会同时在文档流里，切换瞬间高度
+              会跳一下。总耗时 240ms 已经足够"顺"，再长就显得拖。 -->
       <ErrorBoundary>
-        <RouterView />
+        <RouterView v-slot="{ Component }">
+          <Transition name="page" mode="out-in">
+            <component :is="Component" />
+          </Transition>
+        </RouterView>
       </ErrorBoundary>
     </main>
 

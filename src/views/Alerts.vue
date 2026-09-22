@@ -308,6 +308,7 @@ watch(() => care.viewingPatientId, load)
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .summary__item--alert {
@@ -342,6 +343,7 @@ watch(() => care.viewingPatientId, load)
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .filterbar__spacer {
@@ -358,6 +360,7 @@ watch(() => care.viewingPatientId, load)
   border: 1px solid var(--line);
   border-left: 4px solid var(--ink-200);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .alert + .alert {

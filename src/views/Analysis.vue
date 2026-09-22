@@ -390,6 +390,7 @@ onMounted(load)
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .filterbar__item {
@@ -420,6 +421,7 @@ onMounted(load)
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .summary__item--alert {
@@ -467,6 +469,7 @@ onMounted(load)
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .panel--wide {

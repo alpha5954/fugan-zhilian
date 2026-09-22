@@ -410,6 +410,7 @@ onMounted(loadDevices)
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .summary__label {
@@ -434,6 +435,7 @@ onMounted(loadDevices)
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .panel__head {

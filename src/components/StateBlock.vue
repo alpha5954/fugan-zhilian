@@ -75,6 +75,7 @@ defineEmits<{ retry: [] }>()
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .state-block__msg {

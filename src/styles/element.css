@@ -117,7 +117,8 @@
 
   --el-font-family: var(--font-sans);
 
-  /* 阴影只给浮层 —— 面板之间用描边区分层级 */
+  /* 浮层（对话框、下拉、提示框）用这几档阴影。
+     静态卡片走 --shadow-card，见 tokens.css 里的说明 */
   --el-box-shadow: var(--shadow-md);
   --el-box-shadow-light: var(--shadow-sm);
   --el-box-shadow-lighter: var(--shadow-sm);

@@ -563,6 +563,7 @@ watch(() => care.viewingPatientId, loadHistory)
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .panel__title {
@@ -723,6 +724,7 @@ watch(() => care.viewingPatientId, loadHistory)
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .summary__item--accent {

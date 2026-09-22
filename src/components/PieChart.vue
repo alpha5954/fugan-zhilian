@@ -44,7 +44,13 @@ let observer: ResizeObserver | null = null
 function buildOption() {
   return {
     animation: true,
-    animationDuration: 320,
+    animationDuration: 420,
+    // 入场和**更新**分开计时。
+    // 入场可以稍慢一点（420ms）显得从容；数据更新必须快（260ms），
+    // 否则每次改筛选条件都要等它"演"一遍，很烦。
+    animationEasing: 'cubicOut' as const,
+    animationEasingUpdate: 'cubicOut' as const,
+    animationDurationUpdate: 260,
     tooltip: {
       trigger: 'item',
       confine: true,

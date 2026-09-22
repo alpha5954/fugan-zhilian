@@ -58,6 +58,7 @@ defineProps<{
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
+  box-shadow: var(--shadow-card);
 }
 
 .placeholder__todos {

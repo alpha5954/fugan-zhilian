@@ -56,6 +56,7 @@
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
   box-sizing: border-box;
 }
 

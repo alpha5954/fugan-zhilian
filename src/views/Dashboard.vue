@@ -27,6 +27,7 @@ import RiskBadge from '@/components/RiskBadge.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import { PERFORMANCE_METRICS } from '@/constants/project'
 import { buildDemoAlerts, buildDemoSessions } from '@/lib/demoData'
+import { useCountUp } from '@/composables/useCountUp'
 import { buildInsight, type Insight } from '@/lib/insight'
 import { SCORE_DISCLAIMER } from '@/lib/scoreConfig'
 import { useAlertStore } from '@/stores/alert'
@@ -107,6 +108,14 @@ const insight = computed(() =>
   usingDemo.value ? demoInsight() : realInsight.value,
 )
 
+/**
+ * 评分滚动的展示值。
+ *
+ * 只在**值发生变化**时滚 —— 首次加载直接落位。
+ * 从 0 滚到 85 会读成"分数从 0 涨上来了"，而实际是"数据刚加载完"。
+ */
+const shownScore = useCountUp(computed(() => insight.value.score))
+
 async function reload() {
   loading.value = true
   try {
@@ -170,7 +179,7 @@ onMounted(reload)
         class="score__value"
         :class="`score__value--${insight.scoreBand}`"
       >
-        <span class="score__number">{{ insight.score }}</span>
+        <span class="score__number">{{ shownScore }}</span>
         <span class="score__unit">分</span>
       </p>
       <p v-else class="score__value score__value--empty">— —</p>
@@ -389,6 +398,7 @@ onMounted(reload)
      会让页面显得惊惶，而这道条足够传达信息 */
   border-left: 5px solid var(--line-strong);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
   text-align: center;
 }
 
@@ -578,6 +588,7 @@ onMounted(reload)
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .fcard__head {
@@ -630,6 +641,7 @@ onMounted(reload)
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
 }
 

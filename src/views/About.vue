@@ -259,6 +259,7 @@ const MODULE_STATUS = [
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .card__title {
@@ -290,6 +291,7 @@ const MODULE_STATUS = [
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .metric--highlight {
@@ -343,6 +345,7 @@ const MODULE_STATUS = [
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 
 .scenario__head {
@@ -379,6 +382,7 @@ const MODULE_STATUS = [
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
   font-size: 13px;
   line-height: 1.9;
   color: var(--ink-600);
@@ -400,6 +404,7 @@ const MODULE_STATUS = [
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
 }
 
