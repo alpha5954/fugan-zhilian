@@ -11,6 +11,7 @@
 //   4. 时间窗口按**本地**日期算，不是 UTC
 import { buildInsight, BAND_LABEL } from '../src/lib/insight.ts'
 import type { RiskBand } from '../src/lib/insight.ts'
+import { SAFETY_PENALTY } from '../src/lib/scoreConfig.ts'
 import type { Alert, RehabSession } from '../src/types/index.ts'
 
 const results: [string, boolean, string][] = []
@@ -399,9 +400,11 @@ console.log('\n--- 安全事件必须扣分，而且必须说明 ---')
   const warned = buildInsight(perfect, [alert({ severity: 'warning' })], NOW)
   check('一般预警会下调分数', warned.score! < clean.score!, `${clean.score} → ${warned.score}`)
   check(
-    '下调比例按配置走（×0.85）',
-    warned.score === Math.round(clean.score! * 0.85),
-    `${warned.score}，期望 ${Math.round(clean.score! * 0.85)}`,
+    // 期望值从配置里读，不再写死乘数 —— 之前写死 ×0.85，调系数时
+    // 这条会红，但红的是"数字对不上"而不是"逻辑错了"，等于噪音
+    `下调比例按配置走（×${SAFETY_PENALTY.warning}）`,
+    warned.score === Math.round(clean.score! * SAFETY_PENALTY.warning),
+    `${warned.score}，期望 ${Math.round(clean.score! * SAFETY_PENALTY.warning)}`,
   )
   check(
     '保留调整前的分数，界面才能说"原多少分"',
@@ -417,7 +420,23 @@ console.log('\n--- 安全事件必须扣分，而且必须说明 ---')
 
   const critical = buildInsight(perfect, [alert({ severity: 'critical' })], NOW)
   check('严重预警下调更多', critical.score! < warned.score!, `${warned.score} → ${critical.score}`)
-  check('严重事件后分数落到 60 以下', critical.score! < 60, String(critical.score))
+  // 这条原先断言的是"严重事件后分数落到 60 以下"。2026-09-22 把系数从
+  // 0.6 调到 0.8 之后它不再成立 —— 而且它**本来就不可能普遍成立**：
+  // 乘数是按比例扣的，原始分 100 时只要系数 ≥ 0.6，结果就 ≥ 60。
+  // 那条断言只是在测试数据所在的分数段里碰巧为真。
+  //
+  // 换成一条真正普遍成立的：严重事件足以把分数拉出「恢复优秀」档。
+  // 这是"出过安全问题的一周，分数不该好看"的最低要求，同时也能挡住
+  // 有人把系数调到 0.95 这种等于没扣的程度。
+  //
+  // ⚠️ 如果团队要的是"严重事件**必然**进红灯"，那要换机制 ——
+  //    改成「封顶」（严重事件 → 本周评分最高 59 分）才行。乘数做不到，
+  //    因为原始分高的时候扣完还是高。见 scoreConfig 的 SAFETY_PENALTY。
+  check(
+    '严重事件至少把分数拉出「恢复优秀」档',
+    critical.score! < 90,
+    `${critical.score} 分（满分的一周也只剩 ${Math.round(100 * SAFETY_PENALTY.critical)} 分）`,
+  )
   check(
     '说明里点出是严重安全事件',
     critical.adjustments.some((a) => a.text.includes('严重安全事件')),
@@ -432,7 +451,13 @@ console.log('\n--- 安全事件必须扣分，而且必须说明 ---')
     NOW,
   )
   check('多条同级预警不累加', many.score === warned.score, `${many.score} vs ${warned.score}`)
-  check('但次数要写在说明里', many.adjustments[0]!.text.includes('3 次'), many.adjustments[0]!)
+  // 第三个参数是"给人看的详情"。传整个 adjustment 对象会打印成
+  // [object Object] —— 断言红了也读不出为什么
+  check(
+    '但次数要写在说明里',
+    many.adjustments[0]!.text.includes('3 次'),
+    many.adjustments[0]!.text,
+  )
 
   // 一周前的预警不该影响本周
   const oldAlert = buildInsight(
@@ -492,18 +517,47 @@ console.log('\n--- 数据不足时分数要向中间值收敛 ---')
 }
 
 // ============================================================================
-console.log('\n--- 分数与风险色现在是一致的 ---')
+console.log('\n--- 评分色与风险色：是两个轴，不是一致的 ---')
 // ============================================================================
-// 这两者曾经是分开的：分数只反映恢复情况，风险单独用颜色表达。
-// 但实测截图发现那会产生"92 分被涂成橙色"这种自相矛盾的画面 ——
-// 数字和颜色说的不是一回事，而家属只会记住数字。
+// ⚠️ 这一节原先写的是"两个轴合并成一个，两者必然一致"，并断言
+//    `scoreBand === band`。**那条断言是错的**，它一直绿只是因为喂进去的
+//    数据（原始分 85）碰巧绕开了边界，不是因为性质成立。
 //
-// 现在安全事件直接扣分，两个轴合并成一个：**分数已经把安全算进去了**。
-// 颜色仍从分数推出，所以两者必然一致。这条断言就是钉住这一点 ——
-// 哪天有人把安全惩罚拿掉，这里会立刻变红。
+// 【真实情况】
+//   scoreBand（数字的颜色）**只由分数决定**；
+//   band（风险颜色）只看这个礼拜有没有预警。
+//   乘数是按比例扣的，原始分越高扣完剩得越多 —— 100 分的周 ×0.80 还剩
+//   80 分，而 bandFor 只要发现 critical 就报红。两者必然打架，而且这在
+//   数学上就没法用调系数解决。（原先的 ×0.60 也不行：100 × 0.60 = 60，
+//   正好压在下边界上。）
+//
+//   这本来就不是一回事 —— 见 insight.ts 里 Insight.band 的注释：
+//   分数说的是"恢复得怎么样"，风险说的是"有没有危险"。分开是对的。
+//   界面上数字用 scoreBand 上色、风险由各张卡片自己的 band 表达。
+//
+// 【所以这里钉什么】
+//   钉当初真正出问题的那个现象：**高分不能被风险染成橙/红。**
+//   实测截图就是这么发现的 —— 92 分的数字被涂成橙色，数字和颜色说的
+//   不是一回事，而家属只会记住数字。
+//
+// ⚠️ 这一节的数据从"原始分 85"换成了"原始分 100"。原先只测到 85，
+//    高端从来没被覆盖 —— 那条错误的断言就是从这个缺口漏过去的。
 {
-  const perfect = [0, 1, 2, 3, 4].map((n) =>
-    session({ rom_deg: 90, started_at: daysAgo(n) }),
+  // 真正满分的一周：达标 100% + 进步满分 + 稳定满分 + 依从满分
+  const baseline = [9, 11, 13].map((n) =>
+    session({ rom_deg: 45, started_at: daysAgo(n) }),
+  )
+  const perfectWeek = [
+    ...baseline,
+    ...[0, 1, 2, 3, 4].map((n) => session({ rom_deg: 90, started_at: daysAgo(n) })),
+  ]
+
+  // 先把"这组数据确实是满分"钉住。权重哪天调了，这里会先红 ——
+  // 提醒你高端的覆盖范围变了，而不是悄悄退回到只测中段
+  check(
+    '这一组构造出来的确实是原始分 100',
+    buildInsight(perfectWeek, [], NOW).rawScore === 100,
+    String(buildInsight(perfectWeek, [], NOW).rawScore),
   )
 
   const cases: [string, Alert[], RiskBand][] = [
@@ -513,14 +567,26 @@ console.log('\n--- 分数与风险色现在是一致的 ---')
   ]
 
   for (const [label, alerts, want] of cases) {
-    const ins = buildInsight(perfect, alerts, NOW)
+    const ins = buildInsight(perfectWeek, alerts, NOW)
+    // 风险色：按预警等级走，和分数无关
+    expectBand(`${label}：风险色符合预警等级`, ins, want)
+
+    // 分数色：只跟分数走。分数在 80 以上就必须是绿的
+    const high = ins.score! >= 80
     check(
-      `${label}：评分色与风险色一致（${ins.score} 分）`,
-      ins.scoreBand === ins.band,
-      `${ins.scoreBand} / ${ins.band}`,
+      `${label}：${ins.score} 分的数字色只跟分数走`,
+      high ? ins.scoreBand === 'green' : ins.scoreBand !== 'green',
+      `scoreBand=${ins.scoreBand} / band=${ins.band}（两者不同是允许的，不是 bug）`,
     )
-    expectBand(`${label}：等级符合预期`, ins, want)
   }
+
+  // 最高分 + 预警：数字仍然必须是绿的。这就是当初要修的那幅画面
+  const top = buildInsight(perfectWeek, [alert({ severity: 'warning' })], NOW)
+  check(
+    '满分的一周遇到预警，数字不会被涂成橙/红（当初的 bug）',
+    top.score! >= 80 && top.scoreBand === 'green',
+    `${top.score} 分 / scoreBand=${top.scoreBand} / band=${top.band}`,
+  )
 
   // 分数低但没预警 → 也要报红
   const poor = buildInsight([session({ rom_deg: 9, started_at: daysAgo(0) })], [], NOW)
