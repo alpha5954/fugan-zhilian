@@ -8,10 +8,21 @@
 // 底下放最常用的三个 + 一个「更多」，其余收进抽屉。
 //
 // 【为什么是这三个】
-//   概览   —— 打开就想知道"恢复得怎么样"
-//   监测   —— 第二个位置，家属最容易在训练时点进去
-//   预警   —— 安全相关，且要能看到未处理的角标
-// 康复评估、数据分析、设备、监护、关于都放抽屉里 —— 它们不是"每次打开都要看"的。
+//   概览     —— 打开就想知道"恢复得怎么样"
+//   监测     —— 第二个位置，家属最容易在训练时点进去
+//   康复评估 —— 录一次训练、直接看结论，这套系统的核心产出
+//
+// 预警、数据分析、设备、监护、关于都放抽屉里。
+//
+// ⚠️ 底部第三格原先是「预警」，2026-09-22 与「康复评估」对调。这次对调
+//    **有代价，记在这里免得以后有人以为是漏了**：
+//
+//    预警的未处理角标原先挂在底部，一眼就能看到有几条没处理；
+//    现在要先点「更多」再打开抽屉才看得见。安全相关的提示因此变钝了。
+//
+//    桌面端不受影响 —— 顶栏（DefaultLayout）有自己的预警角标。
+//    真要补，该补的是「更多」按钮上一个小圆点：抽屉里任何一项有角标时
+//    它就亮，告诉用户"里面有事"。目前没做。
 //
 // 只在窄屏显示。宽屏用顶部那行，横向空间够，没必要占一条底边。
 // ============================================================================
@@ -36,15 +47,22 @@ const TABS = [
   { path: '/dashboard', label: '概览', icon: 'M3 10.5 12 3l9 7.5M5.5 9.5V20h13V9.5' },
   { path: '/monitor', label: '实时监测', icon: 'M2 12h4l3-7 3 14 3-7h5' },
   {
-    path: '/alerts',
-    label: '预警',
-    icon: 'M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6M10 20a2 2 0 0 0 4 0',
+    path: '/assessment',
+    label: '康复评估',
+    // 写字板 + 对勾。抽屉里那几项都没有图标，这个必须有 ——
+    // 底部导航是纯图标的场景，没有图形就只剩一行小字可认。
+    //
+    // 尺寸对齐旁边两个：实测包围盒必须是 16×17 左右。
+    // 第一版画成 14×16，在屏幕上明显比房子和波形小一圈。
+    // 板子上沿在 x=9~15 处留了缺口，夹子正好嵌在里面 ——
+    // 不留缺口的话板子上沿会横穿夹子内部。
+    icon: 'M9 3h6v2.5H9zM15 4h3.5A1.5 1.5 0 0 1 20 5.5v13A1.5 1.5 0 0 1 18.5 20h-13A1.5 1.5 0 0 1 4 18.5v-13A1.5 1.5 0 0 1 5.5 4H9M8.3 12.6l2.4 2.4 5.3-5.6',
   },
 ] as const
 
 /** 「更多」抽屉里的项 */
 const MORE = [
-  { path: '/assessment', label: '康复评估', desc: '记录一次训练并评估' },
+  { path: '/alerts', label: '预警', desc: '温度与信号异常记录' },
   { path: '/analysis', label: '数据分析', desc: '活动度趋势与达标情况' },
   { path: '/devices', label: '我的设备', desc: '绑定传感器、查看状态' },
   { path: '/care', label: '监护管理', desc: '家属远程查看与邀请码' },
@@ -52,6 +70,19 @@ const MORE = [
 ] as const
 
 const moreOpen = ref(false)
+
+/**
+ * 抽屉里某项的角标数字。0 表示不显示。
+ *
+ * 写成一张表而不是在模板里堆 v-if：角标会跟着导航结构调整而搬家
+ * （预警就是从底部搬进来的），条件散在模板里，搬的时候容易只搬了
+ * 标签忘了搬角标 —— 那会静默失效，界面上不报错。
+ */
+function badgeFor(path: string): number {
+  if (path === '/alerts') return alerts.unacknowledgedTotal
+  if (path === '/care') return care.pendingCount
+  return 0
+}
 
 /** 当前标签高亮。用前缀匹配，子路由也能点亮 */
 function isActive(path: string): boolean {
@@ -65,8 +96,6 @@ function isActive(path: string): boolean {
  * 底部四个 tab 一个都不亮，会以为自己不在导航体系里。
  */
 const moreActive = computed(() => MORE.some((m) => isActive(m.path)))
-
-const alertBadge = computed(() => alerts.unacknowledgedTotal)
 
 function go(path: string) {
   moreOpen.value = false
@@ -90,9 +119,6 @@ function go(path: string) {
         </svg>
       </span>
       <span class="tabbar__label">{{ tab.label }}</span>
-      <span v-if="tab.path === '/alerts' && alertBadge > 0" class="tabbar__badge">
-        {{ alertBadge > 99 ? '99+' : alertBadge }}
-      </span>
     </RouterLink>
 
     <button
@@ -127,8 +153,8 @@ function go(path: string) {
             <span class="more__label">{{ item.label }}</span>
             <span class="more__desc">{{ item.desc }}</span>
           </span>
-          <span v-if="item.path === '/care' && care.pendingCount > 0" class="more__badge">
-            {{ care.pendingCount }}
+          <span v-if="badgeFor(item.path) > 0" class="more__badge">
+            {{ badgeFor(item.path) > 99 ? '99+' : badgeFor(item.path) }}
           </span>
           <span class="more__arrow" aria-hidden="true">›</span>
         </button>
@@ -205,23 +231,6 @@ function go(path: string) {
 
   .tabbar__item.is-active .tabbar__label {
     font-weight: var(--fw-medium);
-  }
-
-  /* 未处理预警的角标。绝对定位在图标右上角，不参与文字排版 */
-  .tabbar__badge {
-    position: absolute;
-    top: 4px;
-    left: 50%;
-    margin-left: 4px;
-    min-width: 16px;
-    padding: 0 4px;
-    border-radius: var(--r-full);
-    background: var(--danger);
-    color: #fff;
-    font-size: var(--fs-micro);
-    line-height: 16px;
-    font-weight: var(--fw-medium);
-    text-align: center;
   }
 }
 
