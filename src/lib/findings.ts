@@ -40,6 +40,18 @@
 
 import { metricLabel, type SessionResult } from './assessment.ts'
 import { TEMP_ALERT_THRESHOLD } from './simulator.ts'
+import {
+  CONFIDENCE_MIN,
+  FATIGUE_DROP,
+  FATIGUE_RISE,
+  MIN_REPS_FOR_TREND,
+  MIN_SINGLE_HISTORY,
+  PHASE_RATIO_MIN,
+  REP_ROM_CV_LIMIT,
+  SHORTFALL_CRITICAL,
+  SINGLE_PROGRESS_THRESHOLD,
+  TOP_FINDINGS,
+} from './scoreConfig.ts'
 import type { RiskBand } from './insight.ts'
 import type { RehabSession } from '@/types'
 
@@ -76,12 +88,6 @@ export interface Finding {
   /** 同级别内的排序，越小越先看 */
   priority: number
 }
-
-/** 认为基线够用的最少同动作历史条数 */
-const MIN_HISTORY = 3
-
-/** 变化超过这个幅度才算"有进步/退步"，否则算持平 */
-const PROGRESS_THRESHOLD = 0.05
 
 // ---------------------------------------------------------------------------
 // 小工具
@@ -146,7 +152,7 @@ export function buildFindings(
       label: `本次${label}未达康复目标`,
       // 差距小的算"需要注意"，差距大的算"需要处理" ——
       // 差 3° 和差 40° 不该是同一句话
-      band: shortfall > 0.3 ? 'red' : 'yellow',
+      band: shortfall > SHORTFALL_CRITICAL ? 'red' : 'yellow',
       evidence:
         `实测 ${result.metricValue.toFixed(1)}°，目标 ${result.target}°，` +
         `差 ${gap.toFixed(1)}°（完成 ${Math.round((1 - shortfall) * 100)}%）`,
@@ -154,7 +160,7 @@ export function buildFindings(
         result.metric === 'hold'
           ? '在无痛前提下逐步延长保持时间、加深下蹲角度'
           : '在无痛范围内逐步增加活动幅度，避免强行牵拉',
-      priority: shortfall > 0.3 ? 2 : 30,
+      priority: shortfall > SHORTFALL_CRITICAL ? 2 : 30,
     })
   }
 
@@ -164,7 +170,7 @@ export function buildFindings(
   // 这是命题点名要求的那项分析能给出的**唯一一条有动作含义的结论**。
   // 静力动作会被 buildEmgAnglePhase 判为不适用，这里自然跳过。
   const phase = result.emgAngle
-  if (phase.applicable && phase.ratio < 0.9) {
+  if (phase.applicable && phase.ratio < PHASE_RATIO_MIN) {
     out.push({
       key: 'phase_late',
       label: '肌电峰值落在离心期，发力时机偏晚',
@@ -182,12 +188,12 @@ export function buildFindings(
   // 3. 各轮次幅度是否稳定
   // -------------------------------------------------------------------------
   const roms = result.reps.map((r) => r.rom).filter((x) => Number.isFinite(x))
-  if (roms.length >= 4) {
+  if (roms.length >= MIN_REPS_FOR_TREND) {
     const c = cv(roms)
-    if (c > 0.15) {
+    if (c > REP_ROM_CV_LIMIT) {
       out.push({
         key: 'rom_unstable',
-        label: '各轮次动作幅度差异较大',
+        label: '本次训练各轮次幅度差异较大',
         band: 'yellow',
         evidence:
           `最大 ${Math.max(...roms).toFixed(1)}° / 最小 ${Math.min(...roms).toFixed(1)}°，` +
@@ -201,13 +207,13 @@ export function buildFindings(
   // -------------------------------------------------------------------------
   // 4. 疲劳趋势
   // -------------------------------------------------------------------------
-  if (result.reps.length >= 4) {
+  if (result.reps.length >= MIN_REPS_FOR_TREND) {
     const half = Math.floor(result.reps.length / 2)
     const early = mean(result.reps.slice(0, half).map((r) => r.rms))
     const late = mean(result.reps.slice(half).map((r) => r.rms))
     const drop = early > 0 ? (early - late) / early : 0
 
-    if (drop > 0.25) {
+    if (drop > FATIGUE_DROP) {
       out.push({
         key: 'fatigue',
         label: '后半程肌电强度明显下降，存在疲劳迹象',
@@ -216,7 +222,7 @@ export function buildFindings(
         action: '缩短单组次数，或延长组间休息，避免疲劳后动作变形',
         priority: 50,
       })
-    } else if (drop < -0.2) {
+    } else if (drop < -FATIGUE_RISE) {
       out.push({
         key: 'fatigue_rising',
         label: '后半程肌电强度高于前半程',
@@ -242,7 +248,7 @@ export function buildFindings(
       action: '核对动作要领是否到位；也可以重新采集一次',
       priority: 10,
     })
-  } else if (result.topConfidence < 0.7) {
+  } else if (result.topConfidence < CONFIDENCE_MIN) {
     out.push({
       key: 'low_confidence',
       label: '动作识别置信度偏低',
@@ -295,7 +301,7 @@ function progressFinding(
     .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
 
   // 样本不够就不给结论。用两三条记录算出来的"进步 30%"只会误导人
-  if (past.length < MIN_HISTORY) return []
+  if (past.length < MIN_SINGLE_HISTORY) return []
 
   const baseline = mean(past)
   if (baseline <= 0) return []
@@ -304,11 +310,11 @@ function progressFinding(
   const pct = Math.abs(Math.round(change * 100))
   const n = past.length
 
-  if (change > PROGRESS_THRESHOLD) {
+  if (change > SINGLE_PROGRESS_THRESHOLD) {
     return [
       {
         key: 'progress_up',
-        label: '较以往同动作有进步',
+        label: '本次较以往同动作有进步',
         band: 'green',
         evidence: `本次 ${result.metricValue.toFixed(1)}°，此前 ${n} 次平均 ${baseline.toFixed(1)}°，提升 ${pct}%`,
         action: '保持当前节奏',
@@ -317,11 +323,11 @@ function progressFinding(
     ]
   }
 
-  if (change < -PROGRESS_THRESHOLD) {
+  if (change < -SINGLE_PROGRESS_THRESHOLD) {
     return [
       {
         key: 'progress_down',
-        label: '较以往同动作有所回落',
+        label: '本次较以往同动作有所回落',
         band: 'yellow',
         evidence: `本次 ${result.metricValue.toFixed(1)}°，此前 ${n} 次平均 ${baseline.toFixed(1)}°，下降 ${pct}%`,
         // 不写"退步了" —— 单次波动很常见，说成退步会引起不必要的焦虑
@@ -334,7 +340,7 @@ function progressFinding(
   return [
     {
       key: 'progress_flat',
-      label: '较以往同动作基本持平',
+      label: '本次较以往同动作基本持平',
       band: 'green',
       evidence: `本次 ${result.metricValue.toFixed(1)}°，此前 ${n} 次平均 ${baseline.toFixed(1)}°`,
       action: '康复有平台期是正常的，按当前方案继续',
@@ -349,7 +355,7 @@ function progressFinding(
  * 一次评估冒五条并列的结论，等于一条都没说 —— 用户会全部略过。
  * 默认给 3 条，其余由界面折起来。
  */
-export function topFindings(findings: Finding[], n = 3): Finding[] {
+export function topFindings(findings: Finding[], n = TOP_FINDINGS): Finding[] {
   return findings.slice(0, Math.max(1, n))
 }
 

@@ -493,11 +493,11 @@ function stabilityPart(input: PartInput): ScorePart {
     weight: WEIGHTS.stability,
     detail:
       cv < STABILITY_GOOD_CV
-        ? '每次动作幅度都很接近，发挥稳定'
+        ? '每次训练的水平都很接近，发挥稳定'
         : cv < STABILITY_FAIR_CV
-          ? '动作幅度偶有起伏，总体可控'
-          : `动作幅度忽大忽小（${Math.round(jumpiestCv * 100)}% 的波动），` +
-            '建议放慢速度、组间多休息',
+          ? '每次训练之间有起伏，总体可控'
+          : `每次训练之间的水平忽高忽低（${Math.round(jumpiestCv * 100)}% 的波动），` +
+            '建议放慢动作速度、保证组间休息',
   }
 }
 

@@ -22,6 +22,7 @@ import {
   type SessionResult,
 } from '@/lib/assessment'
 import { buildFindings, topFindings, type Finding } from '@/lib/findings'
+import { TOP_FINDINGS } from '@/lib/scoreConfig'
 import { formatDuration } from '@/lib/format'
 import { useCareStore } from '@/stores/care'
 import { useDeviceStore } from '@/stores/device'
@@ -136,9 +137,11 @@ const isStaticExercise = computed(() => result.value?.metric === 'hold')
 // 评估结论
 // ---------------------------------------------------------------------------
 // 一次评估可能产出五六条结论，全列出来等于一条都没说 —— 用户会全部略过。
-// 默认只给最靠前的 3 条（已按红黄绿排好），其余折起来。
-
-const FINDING_LIMIT = 3
+// 默认只给最靠前的几条（已按红黄绿排好），其余折起来。
+//
+// 条数取自 scoreConfig 的 TOP_FINDINGS，不在这里另写一个 ——
+// 首页的卡片数、这里的结论数要一起调，分开放迟早会漂。
+const FINDING_LIMIT = TOP_FINDINGS
 const findingsOpen = ref(false)
 
 const findings = computed<Finding[]>(() =>

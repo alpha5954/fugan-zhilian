@@ -300,6 +300,55 @@ console.log('\n--- 每条结论都是完整的 ---')
   )
 }
 
+// ============================================================================
+console.log('\n--- 小于测量误差的变化，不能报成"进步" ---')
+// ============================================================================
+// 这个阈值原来是不假思索的 0.05。它**低于测量误差**：
+// 膝关节活动度的最小可检测变化（MDC）大约 5°~10°，换算成相对值约
+// 6%~11% —— 也就是说，小于 MDC 的变化**无法与测量误差区分**。
+//
+// 拿 5% 当门槛，等于把传感器的噪声和患者当天的状态起伏都报成"有进步"。
+// 家属看到"较以往有进步"会真的以为好转了。
+//
+// 现在取 0.12（MDC 相对区间的上沿）。宁可不报，也不要报一个和噪声
+// 分不开的"进步" —— 平台上出现的每一次"进步"都应该是可信的。
+{
+  const hist = (rom: number) => [
+    past({ rom_deg: rom }),
+    past({ rom_deg: rom }),
+    past({ rom_deg: rom }),
+  ]
+
+  // +6.7%：落在 MDC 区间内，与噪声分不开，不该说进步
+  const noise = buildFindings(session({ metricValue: 96 }), hist(90))
+  check(
+    '变化 6.7% 不报"进步"（低于测量误差）',
+    !keysOf(noise).includes('progress_up'),
+    keysOf(noise).join(',') || '(未生成进步结论)',
+  )
+
+  // +24%：远超 MDC，必须报出来，否则这项功能等于没有
+  const real = buildFindings(session({ metricValue: 112 }), hist(90))
+  check(
+    '变化 24% 报"进步"',
+    keysOf(real).includes('progress_up'),
+    keysOf(real).join(',') || '(未生成进步结论)',
+  )
+  check(
+    '措辞限定为"本次"，与首页那句周度进步区分开',
+    find(real, 'progress_up')!.label.includes('本次'),
+    find(real, 'progress_up')!.label,
+  )
+
+  // 反方向同理：小幅回落也不该报警，单次波动很正常
+  const dip = buildFindings(session({ metricValue: 84 }), hist(90))
+  check(
+    '变化 -6.7% 不报"回落"',
+    !keysOf(dip).includes('progress_down'),
+    keysOf(dip).join(',') || '(未生成回落结论)',
+  )
+}
+
 // ---------------------------------------------------------------- 汇总
 console.log()
 console.log('='.repeat(70))
