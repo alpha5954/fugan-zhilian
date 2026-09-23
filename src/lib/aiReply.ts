@@ -26,15 +26,19 @@
 // 校验，已省略"。**不要静默丢弃** —— 那等于悄悄换了一份数据给用户看。
 //
 // ============================================================================
-// ⚠️ 数值闸门是「一致性」检查，不是「归属」检查，更不是「正确性」检查
+// ⚠️ 数值闸门挡得住什么、挡不住什么
 // ============================================================================
-// 它能挡住的：
+// 【结论条目：归属检查】（2026-09-24 起）
+// 每条结论必须报出它引用的是哪几条事实（`cites`），数值只在**那几条**里查。
+// 所以这两类都挡得住：
 //   ✓ 凭空编出来的测量值（角度、温度、百分比、次数）
+//   ✓ **张冠李戴** —— 引用一条讲角度的事实、正文里却写皮温，当场被拒
 //
-// 它挡不住的（**必须如实写在 README 里，不许 overclaim**）：
-//   ✗ 张冠李戴 —— 上下文里同时有 rom_deg 86.5 和 temp_c 33.1，模型写
-//                「皮温 86.5 °C」照样通过。它只问"这个数字出现过吗"，
-//                不问"它是不是这个量的"
+// 【摘要：仍是全局一致性检查】
+// 摘要是跨事实的总述，没法绑到某一条引用上，所以它比对的是整个上下文。
+// 于是**摘要里的张冠李戴仍然可能**（这是本模块剩下最主要的缺口）。
+//
+// 【两类都挡不住的】
 //   ✗ 整句不带数字的定性断言
 //   ✗ 方向词写反（数据回落却写"进步"）
 //   ✗ 中文数词编造（「连续七天」里没有阿拉伯数字，正则看不见）
@@ -45,7 +49,7 @@
 // ============================================================================
 
 import { complianceIssue } from './compliance.ts'
-import type { AiContext } from './aiContext.ts'
+import type { AiContext, AiFact } from './aiContext.ts'
 import type { RiskBand } from './insight.ts'
 
 // ---------------------------------------------------------------------------
@@ -58,15 +62,27 @@ import type { RiskBand } from './insight.ts'
  * 形状**刻意贴着 `Finding`**（label / evidence / action / band）—— 这样
  * 能用同一套组件和视觉语言渲染，不必新做一个"看起来像外来控件"的卡片。
  *
- * 区别只有一个：`Finding.evidence` 是我们自己算的依据，而 `basis` 是
- * **AI 声称**的依据。所以字段名也不同，不混用 —— 界面上要能一眼看出
- * 哪句是系统算的、哪句是模型说的。
+ * ⚠️ 但 `basis` 和 `Finding.evidence` 有一处**本质**区别，别把它们当成
+ *    一回事：`evidence` 是系统算出来的，而 `basis` 是**由被引用的事实
+ *    拼出来的**（模型只报了编号，正文不是它写的）。所以 `basis` 里的数字
+ *    一定出自我们自己的计算 —— 这正是事实编号制要买到的东西。
  */
 export interface AiPoint {
   /** 结论。主语应当是「数据/训练」，不是「患者」 */
   text: string
-  /** AI 声称的依据。必须含具体数值，且那些数值必须来自上下文 */
+  /**
+   * 依据。**由 `cites` 指向的事实文本拼成，不是模型写的。**
+   *
+   * 模型返回的原始回复里没有这个字段 —— 只有 `cites`。
+   */
   basis: string
+  /**
+   * 这条结论引用了哪几条事实（`F1`、`F3`…）。
+   *
+   * 保留下来是为了**可追溯**：出问题时能一眼看出它指的是哪几条计算项。
+   * 界面不显示编号（家属读着是噪音），但数据里留着。
+   */
+  cites: string[]
   /** 该做什么 */
   action: string
   band: RiskBand
@@ -97,11 +113,19 @@ export interface AiParseResult {
 
 const MAX_SUMMARY_CHARS = 300
 const MAX_POINT_TEXT_CHARS = 120
-const MAX_BASIS_CHARS = 200
 const MAX_ACTION_CHARS = 120
 const MAX_CAVEAT_CHARS = 200
 /** 提示词要求最多 3 条，这里留一条余量 */
 const MAX_POINTS = 4
+
+/**
+ * 一条结论最多能引用几条事实。
+ *
+ * 上限管两件事：界面上的「依据」那一行不能长到读不下去
+ * （3 条 × 约 45 字 ≈ 135 字，和原来的上限同量级），
+ * 以及提示词里那句"不超过 3 条"有个可执行的兜底。
+ */
+const MAX_CITES = 3
 
 const BANDS: readonly RiskBand[] = ['green', 'yellow', 'red']
 
@@ -164,24 +188,61 @@ function extract(text: string): Num[] {
  *    0.9，也不做 90 → 9000 这种放大。单向展开覆盖了真实场景（上下文存
  *    比率、模型写百分比），同时不会把允许集撑到形同虚设。
  */
+/** 把一处内容里的数字都收进集合。两处调用（全局、按引用）共用同一套规则 */
+function collect(v: unknown, into: Set<number>): void {
+  const add = (n: number) => {
+    if (!Number.isFinite(n)) return
+    into.add(n)
+    // 小数 → 百分数形式。只在这一侧展开，理由见 allowedNumbers 的注释
+    if (n > 0 && n < 1) into.add(Number((n * 100).toFixed(1)))
+  }
+
+  const walk = (x: unknown): void => {
+    if (typeof x === 'number') add(x)
+    else if (typeof x === 'string') for (const n of extract(x)) add(n.value)
+    else if (Array.isArray(x)) x.forEach(walk)
+    else if (x && typeof x === 'object') Object.values(x).forEach(walk)
+  }
+
+  walk(v)
+}
+
 export function allowedNumbers(ctx: AiContext): Set<number> {
   const allowed = new Set<number>()
+  collect(ctx, allowed)
+  return allowed
+}
 
-  const add = (v: number) => {
-    if (!Number.isFinite(v)) return
-    allowed.add(v)
-    // 小数 → 百分数形式。只在这一侧展开，理由见函数头
-    if (v > 0 && v < 1) allowed.add(Number((v * 100).toFixed(1)))
+/**
+ * **只看被引用的那几条事实**能出现的数字。
+ *
+ * ============================================================================
+ * 【这条函数就是「事实编号制」的全部意义】
+ * ============================================================================
+ * 原来一条结论的数值闸门是拿**整个上下文**比对的：只要这个数在上下文里
+ * 任何地方出现过就放行。于是下面的情况会漏过去 ——
+ *
+ *   上下文里同时有 `坐位伸膝 实测 80.4°` 和 `坐位伸膝 实测 72.2`，
+ *   模型写「皮温 80.4 °C」，闸门**放行**，因为 80.4 确实出现过。
+ *
+ * 现在模型必须报出它引用的是哪几条事实（`cites`），我们就只拿那几条里的
+ * 数字跟它的正文比。上面那个例子会当场被拒 —— 引用的是一条讲角度的事实，
+ * 而 80.4 不在那条里。
+ *
+ * 也就是说：闸门从**一致性检查**（这个数出现过吗）升级成了**归属检查**
+ * （这个数属于你引用的这件事吗）。这是原来文档里明写"挡不住"的第一条。
+ * ============================================================================
+ */
+export function allowedNumbersForFacts(
+  ctx: AiContext,
+  ids: readonly string[],
+): Set<number> {
+  const byId = new Map(ctx.facts.map((f) => [f.id, f]))
+  const allowed = new Set<number>()
+  for (const id of ids) {
+    const fact = byId.get(id)
+    if (fact) collect(fact.text, allowed)
   }
-
-  const walk = (v: unknown): void => {
-    if (typeof v === 'number') add(v)
-    else if (typeof v === 'string') for (const n of extract(v)) add(n.value)
-    else if (Array.isArray(v)) v.forEach(walk)
-    else if (v && typeof v === 'object') Object.values(v).forEach(walk)
-  }
-
-  walk(ctx)
   return allowed
 }
 
@@ -298,6 +359,7 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
   }
 
   // ---- points：逐条过闸门，坏的丢掉，好的留下 ----
+  const factById = new Map(ctx.facts.map((f) => [f.id, f]))
   const points: AiPoint[] = []
 
   for (const item of o.points) {
@@ -315,16 +377,43 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
       continue
     }
 
+    // ★ 引用。模型只能报编号，依据那一行它碰不到
+    const cites = Array.isArray(p.cites)
+      ? p.cites
+          .filter((c): c is string => typeof c === 'string')
+          .slice(0, MAX_CITES)
+      : []
+
+    if (!cites.length) {
+      // 一条结论必须能指到具体的事实上。指不到就不该出现 ——
+      // 与规则层的 Finding 同一个要求（"展开不了依据的结论出不来"）
+      dropped++
+      continue
+    }
+
+    const cited: AiFact[] = []
+    for (const id of cites) {
+      const fact = factById.get(id)
+      if (fact) cited.push(fact)
+    }
+    if (cited.length !== cites.length) {
+      // 报了一个不存在的编号 —— 这是编造，不是疏忽。整条丢掉
+      dropped++
+      continue
+    }
+
+    // ★ 依据由**我们**渲染。模型的原始文本进不了这一行
+    const basis = cited.map((f) => f.text).join('；')
+
+    // ★ 数值闸门收紧到「你引用的那几条事实里」。理由见 allowedNumbersForFacts
+    const scoped = allowedNumbersForFacts(ctx, cited.map((f) => f.id))
+
     const t = asString(p.text)
-    const basis = asString(p.basis)
     const action = asString(p.action)
 
-    // basis 是 AI 声称的依据 —— 没有它这条结论就不该出现（"展开不了依据
-    // 的结论出不来"，与规则层的 Finding 同一个要求）
     const why =
-      checkText(t, allowed, MAX_POINT_TEXT_CHARS, true) ??
-      checkText(basis, allowed, MAX_BASIS_CHARS, true) ??
-      checkText(action, allowed, MAX_ACTION_CHARS, true)
+      checkText(t, scoped, MAX_POINT_TEXT_CHARS, true) ??
+      checkText(action, scoped, MAX_ACTION_CHARS, true)
 
     if (why) {
       dropped++
@@ -333,7 +422,8 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
 
     points.push({
       text: t.trim(),
-      basis: basis.trim(),
+      basis,
+      cites: cited.map((f) => f.id),
       action: action.trim(),
       band: band as RiskBand,
     })

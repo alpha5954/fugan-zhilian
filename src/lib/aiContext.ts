@@ -43,7 +43,9 @@
 
 import { metricLabel } from './assessment.ts'
 import type { Insight, RiskBand } from './insight.ts'
-import type { TrendReport } from './trend.ts'
+// DIRECTION_LABEL 是**值**导入（不是类型）—— 事实文本里的方向要用界面同一套
+// 说法（「稳步改善」而不是「up」），否则模型会自己译一个词，两处口径就不一致了
+import { DIRECTION_LABEL, type TrendReport } from './trend.ts'
 import type { AnalysisSummary } from './analysis.ts'
 
 // ---------------------------------------------------------------------------
@@ -103,6 +105,45 @@ export interface AiFindingFact {
   action: string
 }
 
+/**
+ * 一条「事实」：带编号、可被引用的完整句子。
+ *
+ * ============================================================================
+ * 【为什么要有这个东西 —— 它是为了补上那道闸门唯一拦不住的东西】
+ * ============================================================================
+ * 原来 AI 的那条结论是这样的：
+ *
+ *   { "text": "...", "basis": "坐位伸膝实测 72.2°，目标 80°" }
+ *                              ↑ **这一行是模型自己写的**
+ *
+ * 于是它可以把数字安到错误的量上。实测复现过：上下文里同时有
+ * `实测 80.4°` 和 `实测 72.2`，模型两条都引用了，闸门**一条都没拦** ——
+ * 因为它只问"这个数字出现过吗"，不问"它属于这个量吗"。
+ *
+ * 现在改成：模型**只准报编号**，依据那一行由我们用自己的字符串渲染。
+ *
+ *   facts: [{ id: "F3", text: "坐位伸膝 最近 72.2°，目标 80°，缺口 7.8°" }]
+ *   point: { "text": "...", "cites": ["F3"] }
+ *                              ↑ 依据 = facts 里 F3 的 text，模型碰不到
+ *
+ * 两个后果，第二个才是关键：
+ *
+ *   ① 依据那一行**不可能**再写错 —— 它是我们自己的字符串
+ *   ② 数值闸门可以从「整个上下文里出现过」**收紧到「你引用的那几条里
+ *      出现过」**。于是"引用 F3（讲角度的）却在正文里写皮温"这种张冠李戴
+ *      当场就被拒 —— 闸门从**一致性检查**升级成了**归属检查**
+ *
+ * 代价是上下文变长、且模型可能漏报编号（那一"条"会被丢掉，不会整篇丢）。
+ * 漏报率要靠 scripts/check-ai.ts 的语料回放盯着。
+ * ============================================================================
+ */
+export interface AiFact {
+  /** `F1`、`F2`… 顺序稳定 —— 同一份数据每次生成的编号必须一样，否则缓存失效 */
+  id: string
+  /** 一句自包含的中文，含具体数值。会被**原样**渲染成界面上的「依据」 */
+  text: string
+}
+
 export interface AiContext {
   page: AiPage
   /**
@@ -136,6 +177,13 @@ export interface AiContext {
    * 和上面那些字段里的数字，不许自己算 —— 见文件头。
    */
   derived: Record<string, number>
+  /**
+   * 带编号的事实清单。**模型只能引用它，不能自己写依据** —— 见 AiFact。
+   *
+   * 顺序必须稳定：同一份数据每次生成的编号要一样，否则 store 的缓存键
+   * （`JSON.stringify(ctx)`）每次都不同，缓存永远不命中。
+   */
+  facts: AiFact[]
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +202,14 @@ export interface AiContext {
 const MAX_ITEMS = 20
 const MAX_FINDINGS = 8
 const MAX_CARDS = 3
+
+/**
+ * 事实条数上限。
+ *
+ * 40 条已经覆盖演示数据的全部情况（实测约 15~20 条）。封顶的原因和别处
+ * 一样：`max_tokens` 封的是输出，输入没人管。
+ */
+const MAX_FACTS = 40
 
 /**
  * 序列化后的字节数上限。
@@ -185,6 +241,47 @@ function round(v: number): number {
 /** 比率保留三位 —— 它是 0~1 的小数，一位就全没了 */
 function ratio(v: number, digits = 3): number {
   return Number.isFinite(v) ? Number(v.toFixed(digits)) : 0
+}
+
+/**
+ * 把派生值写成给人看的样子。
+ *
+ * 0~1 之间的小数按**百分比**写 —— `derived` 里存的是 0.421，而人（和模型）
+ * 说的都是「42.1%」。事实文本里写百分数，模型抄的就是百分数，两边对得上。
+ */
+function humanize(v: number): string {
+  if (v > 0 && v < 1) return `${Number((v * 100).toFixed(1))}%`
+  return String(v)
+}
+
+/**
+ * 事实清单的构造器。
+ *
+ * 编号从 F1 起、按加入顺序自增，**并且去重** —— 同一句话不加两遍，
+ * 否则模型会在两条几乎一样的事实之间选，白占上下文。
+ *
+ * 用闭包而不是 class：`erasableSyntaxOnly` 下类字段虽然也能用，但这个
+ * 模块的重点是能过 node 的类型剥离，少一层语法糖少一分意外。
+ */
+function makeFactBook() {
+  const items: AiFact[] = []
+  const seen = new Set<string>()
+
+  return {
+    add(text: string): void {
+      const t = text.trim()
+      if (!t || seen.has(t) || items.length >= MAX_FACTS) return
+      seen.add(t)
+      items.push({ id: `F${items.length + 1}`, text: t })
+    },
+    /** 一份派生值表 —— 键值拼成「达标率 42.1%」这样的句子 */
+    addDerived(derived: Record<string, number>): void {
+      for (const [k, v] of Object.entries(derived)) this.add(`${k} ${humanize(v)}`)
+    },
+    done(): AiFact[] {
+      return items
+    },
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +348,33 @@ export function buildInsightContext(
     }
   }
 
+  // ---- 事实清单 ----
+  // 顺序**刻意固定**：分数 → 调整 → 分项 → 卡片 → 派生值。
+  // 编号稳定，`JSON.stringify(ctx)` 才稳定，store 的缓存才命中
+  const book = makeFactBook()
+
+  if (score !== null) {
+    book.add(`本周恢复评分 ${score} 分，档位「${insight.level.label}」`)
+  }
+  for (const adj of insight.adjustments) {
+    const sign = adj.delta > 0 ? '+' : ''
+    book.add(`${adj.text}，影响 ${sign}${adj.delta} 分`)
+  }
+  for (const p of insight.parts) {
+    book.add(`${p.label}得分 ${Math.round(p.value * 100)}%。${p.detail}`)
+    if (p.weakest) {
+      book.add(
+        `${p.weakest.exercise} 实测 ${round(p.weakest.actual)}°，` +
+          `目标 ${round(p.weakest.target)}°，` +
+          `缺口 ${round(p.weakest.target - p.weakest.actual)}°`,
+      )
+    }
+  }
+  for (const c of cards) {
+    book.add(`${c.title}：${c.headline}${c.detail ? `。${c.detail}` : ''}`)
+  }
+  book.addDerived(derived)
+
   return {
     page: 'dashboard',
     window: opts.window,
@@ -274,6 +398,7 @@ export function buildInsightContext(
       activeDays: insight.stats.weekDays,
     },
     derived,
+    facts: book.done(),
   }
 }
 
@@ -347,6 +472,26 @@ export function buildTrendContext(
     }
   }
 
+  // ---- 事实清单 ----
+  // 顺序：逐动作 → 结论条目 → 派生值。固定，理由同首页
+  const book = makeFactBook()
+
+  for (const it of report.items) {
+    const dir = it.trend
+      ? `${DIRECTION_LABEL[it.trend.direction]}` +
+        `（${round(it.trend.before)}° → ${round(it.trend.after)}°）`
+      : '记录天数不足，无法判断方向'
+    book.add(
+      `${it.exercise}（${it.metricName}）最近 ${round(it.latest)}°，` +
+        `目标 ${round(it.target)}°，` +
+        `${it.onTarget ? '已达标' : '未达标'}，${dir}`,
+    )
+  }
+  for (const f of findings) {
+    book.add(`${f.label}。依据：${f.evidence}`)
+  }
+  book.addDerived(derived)
+
   return {
     page: 'analysis',
     window: opts.window,
@@ -363,5 +508,6 @@ export function buildTrendContext(
       activeDays: report.activeDays,
     },
     derived,
+    facts: book.done(),
   }
 }

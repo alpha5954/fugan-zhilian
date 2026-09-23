@@ -30,6 +30,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
+import { AI_CACHE_STORAGE_KEY, readCache, writeCache } from '@/lib/aiCache'
 import { AI_ERROR_MESSAGES, aiErrorInfo } from '@/lib/aiErrors'
 import type { AiContext } from '@/lib/aiContext'
 import { parseAiReply, type AiParseResult } from '@/lib/aiReply'
@@ -87,6 +88,34 @@ export const useAiStore = defineStore('ai', () => {
   const dropped = computed(() => result.value?.dropped ?? 0)
   const analysis = computed(() => result.value?.analysis ?? null)
 
+  // ---------------------------------------------------------------------------
+  // 落盘
+  // ---------------------------------------------------------------------------
+  // 收发 localStorage 的只有这两行，格式/过期/超量的逻辑全在 lib/aiCache.ts
+  // 里（纯函数，node 能直接断言）。这样这里出错的可能性就只剩"读不到"。
+  //
+  // 一律 try/catch：无痕模式下 localStorage 会直接抛，配额满了 setItem 也会抛。
+  // 缓存坏了没关系，重算一次 2.5 秒；**让页面炸掉才是问题**。
+
+  function readStored(key: string): AiParseResult | null {
+    try {
+      return readCache(localStorage.getItem(AI_CACHE_STORAGE_KEY), key)
+    } catch {
+      return null
+    }
+  }
+
+  function writeStored(key: string, value: AiParseResult): void {
+    try {
+      localStorage.setItem(
+        AI_CACHE_STORAGE_KEY,
+        writeCache(localStorage.getItem(AI_CACHE_STORAGE_KEY), key, value),
+      )
+    } catch {
+      /* 存不下就算了，不影响这次已经拿到的结果 */
+    }
+  }
+
   /**
    * 发起一次分析。
    *
@@ -95,7 +124,66 @@ export const useAiStore = defineStore('ai', () => {
    * lib/stores/care.ts:34-44 记录过混用两者的后果：解绑设备失败时整张表被
    * 替换成「加载失败」，用户以为数据没了。
    */
-  async function analyze(ctx: AiContext): Promise<void> {
+  /**
+   * 命中缓存就落位。返回是否命中。**绝不发请求。**
+   *
+   * 两级：内存（本次会话算过的）→ 落盘（上次打开页面时算的）。
+   * 落盘那级的键是上下文全文，所以**换了患者或换了窗口必然不命中** ——
+   * 不会把别人的解读显示出来。
+   */
+  function applyCached(key: string): boolean {
+    if (cache && cache.key === key) {
+      result.value = cache.value
+      resultKey.value = key
+      error.value = null
+      return true
+    }
+
+    const stored = readStored(key)
+    if (!stored) return false
+
+    cache = { key, value: stored }
+    result.value = stored
+    resultKey.value = key
+    error.value = null
+    return true
+  }
+
+  /**
+   * 面板挂载 / 上下文变化时调它。
+   *
+   * 与 analyze 的区别只有一个：**它永远不会发请求**。所以可以在挂载时
+   * 放心调用 —— 命中就是白送的（上次算过的结果直接出现在页面上），
+   * 不命中就什么都不做，用户照常点按钮。
+   */
+  function restore(ctx: AiContext | null): boolean {
+    if (!ctx) return false
+    const key = JSON.stringify(ctx)
+    if (applyCached(key)) return true
+
+    // 没命中就把上一份上下文的结果清掉。
+    //
+    // ⚠️ 不清就出事：用户换了时间窗口或换了查看对象之后，面板下面还挂着
+    //    上一份解读 —— 而它说的是**另一段时间、另一个人**的数据，
+    //    却长得和当前结论一模一样。这比"什么都没有"糟得多
+    if (resultKey.value !== key) {
+      result.value = null
+      resultKey.value = null
+      error.value = null
+    }
+    return false
+  }
+
+  /**
+   * 发起一次分析。
+   *
+   * @param opts.refresh 跳过缓存，强制重算。**「重新生成」按钮必须传它** ——
+   *        否则用户点了"重新生成"却拿回同一份结果，会以为按钮坏了
+   */
+  async function analyze(
+    ctx: AiContext,
+    opts: { refresh?: boolean } = {},
+  ): Promise<void> {
     if (!access.value.allowed) {
       error.value = access.value.reason
       return
@@ -105,13 +193,7 @@ export const useAiStore = defineStore('ai', () => {
     // 不发明 hash：那要么引一个纯模块依赖，要么用异步的 crypto.subtle
     const key = JSON.stringify(ctx)
 
-    // 已经算过这个上下文 —— 直接落位，不发请求
-    if (cache && cache.key === key) {
-      result.value = cache.value
-      resultKey.value = key
-      error.value = null
-      return
-    }
+    if (!opts.refresh && applyCached(key)) return
 
     // 同一个上下文正在飞 —— 共用它，不再发一次
     if (inflight && inflight.key === key) return inflight.promise
@@ -148,8 +230,12 @@ export const useAiStore = defineStore('ai', () => {
       // 网络来的，所以能被 node 直接断言
       const parsed = parseAiReply(text, ctx)
 
-      // ★ 只有解析通过的结果才配进缓存。见文件头那个教训
-      if (parsed.analysis) cache = { key, value: parsed }
+      // ★ 只有解析通过的结果才配进缓存（内存和落盘都一样）。
+      //    见文件头那个 guestPromise 教训
+      if (parsed.analysis) {
+        cache = { key, value: parsed }
+        writeStored(key, parsed)
+      }
 
       result.value = parsed
       resultKey.value = key
@@ -190,6 +276,7 @@ export const useAiStore = defineStore('ai', () => {
     dropped,
     access,
     analyze,
+    restore,
     reset,
   }
 })

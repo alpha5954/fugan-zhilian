@@ -33,7 +33,7 @@
 // 核验的模型输出印在一份给临床医生看的报告里，正是 lib/findings.ts 那段
 // 合规边界存在的理由。
 // ============================================================================
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Info, Lock, RefreshCw, Sparkles } from 'lucide-vue-next'
 
 import FindingCard from './FindingCard.vue'
@@ -123,6 +123,37 @@ function run(): void {
   if (!props.context || ai.loading) return
   void ai.analyze(props.context)
 }
+
+/**
+ * 「重新生成」。
+ *
+ * ⚠️ 必须 `refresh: true` 绕过缓存 —— 否则用户点了"重新生成"却拿回
+ *    一模一样的那段话，只会以为按钮坏了。**刷新一次就是一次计费**，
+ *    所以这一下要真的是新的一次请求。
+ */
+function regenerate(): void {
+  if (!props.context || ai.loading) return
+  void ai.analyze(props.context, { refresh: true })
+}
+
+// ---------------------------------------------------------------------------
+// 恢复上次的结果
+// ---------------------------------------------------------------------------
+// ⚠️ 这**不是**自动调用（自动调用每次打开页面都要等 2.5 秒、还要计费），
+//    而是"只查缓存"：命中就把上次算好的直接摆出来，不命中什么都不做。
+//    结果是第一次 2.5 秒，之后打开页面**立刻就有**。
+//
+// 换了窗口 / 换了查看对象时，restore 会把上一份结果清掉 —— 不清的话
+// 下面挂着的就是另一段时间、另一个人的解读。见 stores/ai.ts 的注释。
+onMounted(() => ai.restore(props.context))
+
+watch(
+  () => currentKey.value,
+  () => {
+    // 请求正在飞的时候不要清 —— 那个结果马上就到了
+    if (!ai.loading) ai.restore(props.context)
+  },
+)
 </script>
 
 <template>
@@ -209,7 +240,8 @@ function run(): void {
           <p v-if="context?.demo" class="ai__demo">
             本次分析所用的数据为演示数据。
           </p>
-          <el-button size="small" text @click="run">重新生成</el-button>
+          <!-- 重新生成 = 再花一次钱。所以它绕开缓存，见 regenerate 的注释 -->
+          <el-button size="small" text @click="regenerate">重新生成</el-button>
         </div>
       </div>
     </template>

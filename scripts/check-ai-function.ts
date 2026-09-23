@@ -64,6 +64,17 @@ console.log('='.repeat(70))
     !!derived && Object.values(derived).every((v) => typeof v === 'number'),
     JSON.stringify(derived),
   )
+
+  // ★ 事实清单：模型靠它引用，客户端靠它渲染依据。
+  //   这一份丢了的话，模型报的 cites 全部指向不存在的编号，
+  //   每一条结论都会被拒 —— 功能等于没有，而且不会报错
+  const facts = out?.facts as { id: string; text: string }[] | undefined
+  check('facts 被保留下来', Array.isArray(facts) && facts.length > 0, `${facts?.length ?? 0} 条`)
+  check(
+    '每条事实都有编号和文本',
+    !!facts && facts.every((f) => /^F\d+$/.test(f.id) && f.text.length > 0),
+    facts?.slice(0, 3).map((f) => f.id).join(',') ?? '',
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +170,30 @@ console.log('='.repeat(70))
   })
   const dk = Object.keys((longKeys?.derived as Record<string, number>) ?? {})
   check('超长的 derived 键被丢掉', dk.length === 1 && dk[0] === '正常键', dk.join(','))
+
+  // facts 的上限与限长。**那一段 text 是唯一既进提示词、又会被原样显示给
+  // 用户的字符串**，所以它必须被夹住 —— 否则一个伪造的客户端可以往里面塞
+  // 任意长文本，而那文本会被渲染到界面上
+  const manyFacts = validateContext({
+    ...base,
+    facts: Array.from({ length: 300 }, (_, i) => ({ id: `F${i + 1}`, text: `事实 ${i}` })),
+  })
+  const fc = (manyFacts?.facts as unknown[])?.length ?? 0
+  check('facts 被截到 40 条以内', fc <= 40, `${fc} 条`)
+
+  const longFact = validateContext({
+    ...base,
+    facts: [
+      { id: 'F1', text: 'x'.repeat(500) },
+      { id: 'F2', text: '正常长度的事实' },
+    ],
+  })
+  const keptFacts = (longFact?.facts as { id: string }[]) ?? []
+  check(
+    '超长的 fact.text 那条被丢掉，正常那条留着',
+    keptFacts.length === 1 && keptFacts[0]!.id === 'F2',
+    `${keptFacts.length} 条`,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +224,31 @@ console.log('='.repeat(70))
   check(
     '提示词里的 band 取值与客户端一致',
     ['green', 'yellow', 'red'].every((b) => SYSTEM_PROMPT.includes(b)),
+  )
+
+  // ★ 事实编号制：提示词必须**要求引用编号**，而且**不能出现 basis**
+  //
+  // 后一条容易被忽略：只要提示词里还留着 "basis"，模型就会照着写，
+  // 而客户端不会读它 —— 那一条结论因为缺 cites 被丢掉，
+  // 表现是"AI 分析质量突然变差"，查起来要绕一大圈
+  check('提示词要求报引用编号 cites', SYSTEM_PROMPT.includes('cites'))
+  check(
+    '提示词说明了依据由系统渲染、不用自己写',
+    SYSTEM_PROMPT.includes('不要自己写依据'),
+  )
+  // ⚠️ 查的是 basis **作为 JSON 键**出现，不是"出现过这个单词"。
+  //    提示词里有一句「points 里没有 basis 字段」—— 那是**刻意**写的，
+  //    用来打消模型的疑虑。第一版断言用 includes('basis') 检查，于是
+  //    被自己那句否定句判红了。断言错了而不是代码错了，这个仓库专门
+  //    记过这一类。
+  check(
+    '输出模板里没有 basis 键（模型照着写会导致整条被拒）',
+    !/["']basis["']\s*:/.test(SYSTEM_PROMPT),
+    '模板里有的话模型会照写，而客户端不读它',
+  )
+  check(
+    '提示词要求正文数值来自引用的那几条',
+    SYSTEM_PROMPT.includes('引用范围之外的数字'),
   )
 }
 

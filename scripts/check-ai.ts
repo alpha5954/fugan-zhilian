@@ -21,9 +21,14 @@ import {
   unmatchedNumber,
   type AiParseResult,
 } from '../src/lib/aiReply.ts'
+import {
+  AI_CACHE_STORAGE_KEY,
+  readCache,
+  writeCache,
+} from '../src/lib/aiCache.ts'
 import { BANNED_TERMS, complianceIssue } from '../src/lib/compliance.ts'
 import { aiAccess, AI_REQUIRES_PLAN } from '../src/lib/entitlements.ts'
-import type { AiContext } from '../src/lib/aiContext.ts'
+import type { AiContext, AiFact } from '../src/lib/aiContext.ts'
 
 const results: [string, boolean, string][] = []
 function check(label: string, ok: boolean, detail = '') {
@@ -54,21 +59,42 @@ function trendCtx(): AiContext {
   })
 }
 
-/** 造一份合法的 AI 回复 */
-function goodReply(over: Record<string, unknown> = {}) {
+/**
+ * 造一份合法的 AI 回复。
+ *
+ * ⚠️ 注意 `points` 里**没有 basis** —— 依据不是模型写的，是它引用的。
+ *    模型只报编号（`cites`），原文由 aiReply 从 ctx.facts 里取。
+ */
+function goodReply(ctx: AiContext, over: Record<string, unknown> = {}) {
+  const first = ctx.facts[0]
   return JSON.stringify({
     summary: '这段时间的训练节奏保持得不错，多数动作已经达到康复目标。',
     points: [
       {
-        text: '屈膝滑动最近稳定在目标附近，是几个动作里进展最明显的。',
-        basis: '见「屈膝滑动」这一行的实测值与目标值的对比',
-        action: '保持当前幅度，不必再加大',
+        text: '整体情况稳定，没有需要特别处理的项。',
+        cites: first ? [first.id] : [],
+        action: '保持当前节奏',
         band: 'green',
       },
     ],
     caveat: '以上依据系统已算出的指标整理，具体训练方案请遵治疗师安排。',
     ...over,
   })
+}
+
+/** 造一条结论。默认引用第一条事实 */
+function point(
+  ctx: AiContext,
+  over: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const first = ctx.facts[0]
+  return {
+    text: '整体情况稳定。',
+    cites: first ? [first.id] : [],
+    action: '保持当前节奏',
+    band: 'green',
+    ...over,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -88,8 +114,17 @@ console.log('='.repeat(70))
   check('上下文里没有 patient_id', !json.includes('patient_id'))
   check('上下文里没有 device_id', !json.includes('device_id'))
 
-  // 演示数据的 id 形如 demo-0，不该混进去
-  check('上下文里没有记录 id', !/"id"/.test(json))
+  // 演示数据的 id 形如 demo-0，不该混进去。
+  //
+  // ⚠️ 这里**不能只看键名** —— `facts` 里也有 id 字段（F1、F2…），那是引用
+  //    编号、不是个人信息。原先是 `!/"id"/.test(json)`，加了事实清单之后
+  //    它就误报了。改成看**值**：只允许 F 开头的编号
+  const idValues = [...json.matchAll(/"id":"([^"]*)"/g)].map((m) => m[1] ?? '')
+  check(
+    '上下文里没有记录 id（facts 的 F1/F2 是引用编号，不算）',
+    idValues.every((v) => /^F\d+$/.test(v)),
+    idValues.slice(0, 6).join(',') || '（无）',
+  )
 
   console.log(`  首页上下文长度：${json.length} 字符（上限 ${MAX_CONTEXT_CHARS}）`)
   check(
@@ -215,15 +250,26 @@ console.log('='.repeat(70))
 
 {
   const ctx = insightCtx()
-  const r = parseAiReply(goodReply(), ctx)
+  const r = parseAiReply(goodReply(ctx), ctx)
   check('一份正常的回复能通过', r.analysis !== null, r.reason ?? '')
   check('通过时没有丢条', r.dropped === 0, `dropped=${r.dropped}`)
   check('summary 被保留', !!r.analysis?.summary)
   check('points 被保留', (r.analysis?.points.length ?? 0) === 1)
 
+  // ★ 依据必须是**我们渲染的原文**，而不是模型写的什么
+  const p0 = r.analysis?.points[0]
+  const citedFact = ctx.facts[0]
+  check(
+    '依据 = 被引用事实的原文（不是模型写的）',
+    !!p0 && !!citedFact && p0.basis === citedFact.text,
+    p0 ? p0.basis.slice(0, 40) : '（没有）',
+  )
+  check('cites 被保留下来（可追溯）', !!p0 && p0.cites.length > 0, p0?.cites.join(',') ?? '')
+
   // 引用上下文里真实存在的数字，必须通过
   const score = ctx.score?.value
-  if (score !== null && score !== undefined) {
+  const scoreFact = ctx.facts.find((f) => f.text.includes(`${score} 分`))
+  if (score !== null && score !== undefined && scoreFact) {
     const withNumber = JSON.stringify({
       summary: `本周恢复评分为 ${score} 分。`,
       points: [],
@@ -232,7 +278,7 @@ console.log('='.repeat(70))
     const r2 = parseAiReply(withNumber, ctx)
     check(`引用上下文里真实存在的数字（${score}）能通过`, r2.analysis !== null, r2.reason ?? '')
   } else {
-    check('（跳过）本用例需要 demo 数据里有分数', false, 'score 是 null')
+    check('（跳过）需要 demo 数据里有分数事实', true, '本轮 demo 数据里没有')
   }
 }
 
@@ -250,14 +296,7 @@ console.log('='.repeat(70))
   // 一个绝不可能出现在上下文里的数
   const hallucinated = JSON.stringify({
     summary: '总体情况良好。',
-    points: [
-      {
-        text: '整体提升了 237%，效果显著。',
-        basis: '与上期相比',
-        action: '继续保持',
-        band: 'green',
-      },
-    ],
+    points: [point(ctx, { text: '整体提升了 237%，效果显著。' })],
     caveat: '',
   })
   const r = parseAiReply(hallucinated, ctx)
@@ -271,9 +310,7 @@ console.log('='.repeat(70))
   // 全部条目都编造 → 整篇降级
   const allBad = JSON.stringify({
     summary: '整体提升了 237%。',
-    points: [
-      { text: '达到了 238% 的水平。', basis: '依据 239%', action: '保持', band: 'green' },
-    ],
+    points: [point(ctx, { text: '达到了 238% 的水平。' })],
     caveat: '',
   })
   const r2 = parseAiReply(allBad, ctx)
@@ -296,6 +333,162 @@ console.log('='.repeat(70))
     '全角数字被规范化成 ASCII',
     unmatchedNumber(fullwidth, allowed) === 123 || unmatchedNumber(fullwidth, allowed) === null,
     `unmatched=${unmatchedNumber(fullwidth, allowed)}`,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 5b. ★ 事实编号制：引用与归属
+// ---------------------------------------------------------------------------
+// 这一组钉的是 2026-09-24 那次改造要买到的东西。
+//
+// 改之前：依据由模型自己写，闸门拿**整个上下文**比对 —— 于是"引用一条讲
+// 角度的事实、正文里却写皮温"这种情况**拦不住**（只问数字出现过没有）。
+// 改之后：模型只报编号，依据由我们渲染；数值只在**它引用的那几条**里查。
+//
+// 下面第一条用例就是那个原来拦不住的场景。它红了，说明改造白做了。
+console.log()
+console.log('='.repeat(70))
+console.log('5b. 事实编号制：引用必须成立，数字必须在引用范围内')
+console.log('='.repeat(70))
+
+{
+  const ctx = insightCtx()
+  console.log(`  事实清单 ${ctx.facts.length} 条：`)
+  for (const f of ctx.facts.slice(0, 4)) console.log(`    ${f.id}  ${f.text.slice(0, 46)}`)
+
+  check('上下文里有事实清单', ctx.facts.length > 0, `${ctx.facts.length} 条`)
+  check(
+    '编号连续且从 F1 起',
+    ctx.facts.every((f, i) => f.id === `F${i + 1}`),
+    ctx.facts.map((f) => f.id).join(','),
+  )
+  // 编号稳定 = 缓存键稳定。同一份数据生成两次必须一样
+  const again = insightCtx()
+  check(
+    '同一份数据生成的事实清单逐字节一致（否则缓存永不命中）',
+    JSON.stringify(again.facts) === JSON.stringify(ctx.facts),
+  )
+
+  // ---- 引用本身 ----
+  const noCites = JSON.stringify({
+    summary: '总体稳定。',
+    points: [{ text: '某项稳定。', action: '保持', band: 'green' }],
+    caveat: '',
+  })
+  check('不报引用 → 该条被拒', parseAiReply(noCites, ctx).dropped === 1)
+
+  const emptyCites = JSON.stringify({
+    summary: '总体稳定。',
+    points: [{ text: '某项稳定。', cites: [], action: '保持', band: 'green' }],
+    caveat: '',
+  })
+  check('引用是空数组 → 该条被拒', parseAiReply(emptyCites, ctx).dropped === 1)
+
+  const fakeId = JSON.stringify({
+    summary: '总体稳定。',
+    points: [{ text: '某项稳定。', cites: ['F99'], action: '保持', band: 'green' }],
+    caveat: '',
+  })
+  check('报了不存在的编号 → 该条被拒（编造，不是疏忽）', parseAiReply(fakeId, ctx).dropped === 1)
+
+  // ---- ★ 张冠李戴 ----
+  // 找两条数字**不重叠**的事实。重叠的要排除，否则容差（±0.5）会让
+  // 「80」和「80.4」互相匹配，用例就失去意义了
+  const numsOf = (t: string): number[] =>
+    (t.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number)
+
+  let host: AiFact | undefined
+  let other: AiFact | undefined
+  let stolen: number | undefined
+
+  outer: for (const a of ctx.facts) {
+    const na = numsOf(a.text)
+    for (const b of ctx.facts) {
+      if (a.id === b.id) continue
+      const cand = numsOf(b.text).filter(
+        (n) => n !== 0 && na.every((m) => Math.abs(n - m) > 1),
+      )
+      // 取绝对值最大的那个 —— 「偷来的」数字越像个真实测量值，
+      // 这个用例越接近它要防的场景（把皮温安到角度上那种）
+      if (cand.length) {
+        host = a
+        other = b
+        stolen = cand.reduce((x, y) => (Math.abs(y) > Math.abs(x) ? y : x))
+        break outer
+      }
+    }
+  }
+
+  if (host && other && stolen !== undefined) {
+    console.log(`  用 ${host.id}（${host.text.slice(0, 30)}…）`)
+    console.log(`  偷 ${other.id} 里的数字 ${stolen}`)
+
+    const swapped = JSON.stringify({
+      summary: '总体稳定。',
+      points: [point(ctx, { text: `该项的数值是 ${stolen}。`, cites: [host.id] })],
+      caveat: '',
+    })
+    const r = parseAiReply(swapped, ctx)
+    check(
+      '★ 引用 A 却写 B 的数字（张冠李戴）→ 被拒',
+      r.dropped === 1,
+      `写了 ${stolen}，但它不在 ${host.id} 里`,
+    )
+
+    // 反方向：写被引用事实**自己**的数字，必须通过（否则闸门太紧）
+    const own = numsOf(host.text)[0]
+    if (own !== undefined) {
+      const honest = JSON.stringify({
+        summary: '总体稳定。',
+        points: [point(ctx, { text: `该项的数值是 ${own}。`, cites: [host.id] })],
+        caveat: '',
+      })
+      const r2 = parseAiReply(honest, ctx)
+      check(
+        '正文写被引用事实自己的数字 → 通过',
+        r2.analysis !== null && r2.dropped === 0,
+        r2.reason ?? `写了 ${own}`,
+      )
+    }
+  } else {
+    check('（跳过）没找到数字不重叠的两条事实', false, 'demo 数据变了？')
+  }
+
+  // ---- 引用多条 ----
+  const two = JSON.stringify({
+    summary: '总体稳定。',
+    points: [
+      point(ctx, {
+        text: '整体平稳。',
+        cites: ctx.facts.slice(0, 2).map((f) => f.id),
+      }),
+    ],
+    caveat: '',
+  })
+  const r3 = parseAiReply(two, ctx)
+  check('引用两条事实 → 通过', r3.analysis !== null, r3.reason ?? '')
+  check(
+    '两条的依据用；拼在一起',
+    (r3.analysis?.points[0]?.basis ?? '').includes('；'),
+    r3.analysis?.points[0]?.basis.slice(0, 50) ?? '',
+  )
+
+  // 超过上限的引用要被截断，不是整条丢
+  const many = JSON.stringify({
+    summary: '总体稳定。',
+    points: [
+      point(ctx, {
+        text: '整体平稳。',
+        cites: ctx.facts.slice(0, 10).map((f) => f.id),
+      }),
+    ],
+    caveat: '',
+  })
+  const r4 = parseAiReply(many, ctx)
+  check(
+    '引用超过 3 条 → 截到 3 条而不是丢掉整条',
+    r4.analysis !== null && (r4.analysis.points[0]?.cites.length ?? 0) <= 3,
+    `cites=${r4.analysis?.points[0]?.cites.length}`,
   )
 }
 
@@ -347,14 +540,7 @@ console.log('='.repeat(70))
   const ctx = insightCtx()
   const bad = JSON.stringify({
     summary: '总体情况良好。',
-    points: [
-      {
-        text: '存在股四头肌萎缩的迹象。',
-        basis: '依据本周数据',
-        action: '联系医生',
-        band: 'yellow',
-      },
-    ],
+    points: [point(ctx, { text: '存在股四头肌萎缩的迹象。', action: '联系医生' })],
     caveat: '',
   })
   const r = parseAiReply(bad, ctx)
@@ -390,7 +576,7 @@ console.log('='.repeat(70))
   // band 非法的那一条要被拒，不是把整篇拒掉
   const badBand = JSON.stringify({
     summary: '总体良好。',
-    points: [{ text: '数据平稳。', basis: '本周数据', action: '保持', band: 'purple' }],
+    points: [point(ctx, { band: 'purple' })],
     caveat: '',
   })
   const r = parseAiReply(badBand, ctx)
@@ -403,7 +589,20 @@ console.log('='.repeat(70))
     caveat: '',
   })
   const r2 = parseAiReply(missingField, ctx)
-  check('缺 basis / action 的条目被拒', r2.dropped === 1, `dropped=${r2.dropped}`)
+  check('缺 cites / action 的条目被拒', r2.dropped === 1, `dropped=${r2.dropped}`)
+
+  // 老形状（模型写 basis）必须被拒 —— 它没有 cites
+  const oldShape = JSON.stringify({
+    summary: '总体良好。',
+    points: [
+      { text: '数据平稳。', basis: '本周训练 7 次', action: '保持', band: 'green' },
+    ],
+    caveat: '',
+  })
+  check(
+    '模型自己写 basis 的老形状被拒（依据只能由我们渲染）',
+    parseAiReply(oldShape, ctx).dropped === 1,
+  )
 
   // 超长
   const tooLong = JSON.stringify({
@@ -447,6 +646,93 @@ console.log('='.repeat(70))
     typeof denied.allowed === 'boolean' && typeof denied.reason === 'string',
   )
   check('能用时 reason 是 null', aiAccess('free').reason === null)
+}
+
+// ---------------------------------------------------------------------------
+// 9. 本地缓存
+// ---------------------------------------------------------------------------
+// 这一组守的是**两类相反的错**：
+//   ① 该命中的没命中 → 用户白等 2.5 秒、白花一次钱（功能变差，但不危险）
+//   ② 不该命中的命中了 → 把**另一段时间、另一个人**的解读显示出来
+//                        （危险，而且完全看不出来）
+// 所以边界条件（过期、换键、格式坏）一条都不能少。
+console.log()
+console.log('='.repeat(70))
+console.log('9. 本地缓存：该省的省，不该命中的绝不命中')
+console.log('='.repeat(70))
+
+{
+  const at = 1_700_000_000_000
+  const ok = (summary: string): AiParseResult => ({
+    analysis: { summary, points: [], caveat: '' },
+    dropped: 0,
+    reason: null,
+  })
+  /** 全被闸门拒掉 —— 解析结果合法，但**没有内容** */
+  const rejected: AiParseResult = {
+    analysis: null,
+    dropped: 3,
+    reason: 'AI 这次给出的内容没有通过校验，已全部丢弃',
+  }
+
+  // ---- 基本读写 ----
+  const blob = writeCache(null, 'KEY-A', ok('第一份'), at)
+  check('写进去能读出来', readCache(blob, 'KEY-A', at)?.analysis?.summary === '第一份')
+
+  // ---- 换键必须不命中（换了患者 / 换了窗口）----
+  check('换了上下文键 → 不命中', readCache(blob, 'KEY-B', at) === null)
+
+  // ---- 坏输入一律当没有 ----
+  check('null → 不命中', readCache(null, 'KEY-A', at) === null)
+  check('空串 → 不命中', readCache('', 'KEY-A', at) === null)
+  check('截断的 JSON → 不命中', readCache('[{"k":"KEY-A"', 'KEY-A', at) === null)
+  check('不是数组 → 不命中', readCache('{"k":"KEY-A"}', 'KEY-A', at) === null)
+  check('数组里是垃圾 → 不命中', readCache('[1,2,3]', 'KEY-A', at) === null)
+
+  // ---- ★ 失败绝不入库 ----
+  // 这是 user.ts 那个 guestPromise 教训的同一件事：一次失败被存下来，
+  // 之后每次都会直接命中那个失败，用户再也没有重试的机会
+  const afterFail = writeCache(blob, 'KEY-C', rejected, at)
+  check(
+    '★ 失败的结果写不进去',
+    readCache(afterFail, 'KEY-C', at) === null,
+    '写进去了的话，这个上下文再也重试不出来',
+  )
+  check('写入失败不影响已有的缓存', readCache(afterFail, 'KEY-A', at) !== null)
+
+  // 万一有人手改 localStorage 塞了一条失败进去，读的时候也要挡掉
+  const tampered = JSON.stringify([{ k: 'KEY-D', value: rejected, at }])
+  check(
+    '★ 手改进去的失败记录也读不出来（缓存是不可信输入）',
+    readCache(tampered, 'KEY-D', at) === null,
+  )
+
+  // ---- 过期 ----
+  const later = at + 8 * 24 * 60 * 60 * 1000 // 8 天后（TTL 是 7 天）
+  check('过期后不命中', readCache(blob, 'KEY-A', later) === null)
+  check('没过期照常命中', readCache(blob, 'KEY-A', at + 6 * 24 * 60 * 60 * 1000) !== null)
+  check(
+    '写入时顺手清掉过期的',
+    !writeCache(blob, 'KEY-E', ok('新的'), later).includes('KEY-A'),
+    '否则存储只增不减',
+  )
+
+  // ---- 条数上限 ----
+  let acc: string | null = null
+  for (let i = 0; i < 10; i++) acc = writeCache(acc, `KEY-${i}`, ok(`第 ${i} 份`), at)
+  const parsed = JSON.parse(acc ?? '[]') as unknown[]
+  check('最多存 2 条（两页各一条）', parsed.length <= 2, `${parsed.length} 条`)
+  check('留下的是最新的那条', readCache(acc, 'KEY-9', at)?.analysis?.summary === '第 9 份')
+
+  // ---- 同一个键写两次只留一条 ----
+  const twice = writeCache(writeCache(null, 'KEY-X', ok('旧'), at), 'KEY-X', ok('新'), at)
+  check(
+    '同一个键重复写不会堆两条',
+    (JSON.parse(twice) as unknown[]).length === 1 &&
+      readCache(twice, 'KEY-X', at)?.analysis?.summary === '新',
+  )
+
+  check('存储键带版本号', /^fugan\.ai\.v\d+$/.test(AI_CACHE_STORAGE_KEY), AI_CACHE_STORAGE_KEY)
 }
 
 // ---------------------------------------------------------------------------

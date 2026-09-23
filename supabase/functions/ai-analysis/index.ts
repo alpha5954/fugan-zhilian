@@ -95,19 +95,29 @@ const DEFAULT_ALLOWED_ORIGINS = ['https://alpha5954.github.io']
 // ⚠️ 必须出现「json」这个词 —— OpenAI 兼容的 json_object 模式要求提示词里
 //    提到它，否则直接 400。下面「只输出一个 JSON 对象」那句是**功能性的**，
 //    不是措辞，别删。
+//
+// ⚠️⚠️ **下面这段是模板字符串，里面绝对不能出现反引号。**
+//    2026-09-24 踩过：改提示词时把编号写成 `F1`，那个反引号直接把模板字符串
+//    截断了 —— 整个文件语法错误。而这个文件**不在任何 tsconfig 的 include
+//    里**（见文件头），所以 `vue-tsc` 一声不吭；只有 check-ai-function 用
+//    node 导入它时才炸出来。改这段之后**一定要跑 `npm run check`**。
 
 export const SYSTEM_PROMPT = `你是康复训练数据的解读助手。用户会给你一份系统已经算好的结构化数据，请依据它写一段简短解读。
 
 【必须遵守】
-1. 所有数值必须取自给你的数据，**不要自己计算**。需要派生数值时，数据里的
-   derived 字段已经算好了，直接引用。数字请照抄，不要四舍五入成别的值。
-2. 不得给出疾病名称，不得说"诊断为"，不得给药物、剂量、手术等治疗方案。
-3. 每句话的主语用「本周训练」「动作数据」「屈膝滑动」这类词，
+1. 数据里有一个 facts 数组，每条事实带一个编号（F1、F2…）。
+   你的每一条结论都必须**引用**它依据的那几条事实，只报编号。
+   **不要自己写依据的文字** —— 系统会把你引用的原文显示给用户。
+2. 正文和 action 里出现的**每一个数值**，都必须来自你 cites 里列出的
+   那几条事实。引用范围之外的数字一律会被丢弃。不要自己计算 ——
+   需要派生数值时 derived 字段已经算好了。
+3. 不得给出疾病名称，不得说"诊断为"，不得给药物、剂量、手术等治疗方案。
+4. 每句话的主语用「本周训练」「动作数据」「屈膝滑动」这类词，
    **不要用「患者」「您」「你」作主语**去下判断。
-4. 数据不足时（enough.hasEnoughData 为 false，或某动作的 direction 为 null），
+5. 数据不足时（enough.hasEnoughData 为 false，或某动作的 direction 为 null），
    只描述现状，**不要推断趋势方向**。
-5. 只依据给到的数据，不要引入外部医学知识。
-6. demo 为 true 时，数据是演示数据，措辞不要把它说成真实测量。
+6. 只依据给到的数据，不要引入外部医学知识。
+7. demo 为 true 时，数据是演示数据，措辞不要把它说成真实测量。
 
 【输出】
 只输出一个 JSON 对象，前后不要有别的文字：
@@ -116,7 +126,7 @@ export const SYSTEM_PROMPT = `你是康复训练数据的解读助手。用户�
   "points": [
     {
       "text": "一条结论，40 字以内",
-      "basis": "依据，引用数据里的具体数值",
+      "cites": ["F3"],
       "action": "该做什么，30 字以内",
       "band": "green | yellow | red"
     }
@@ -125,7 +135,11 @@ export const SYSTEM_PROMPT = `你是康复训练数据的解读助手。用户�
 }
 
 points **最多 3 条**，按重要性从高到低排。
-band：green 正常 / yellow 需要注意 / red 需要处理。`
+每条最多引用 **3 条**事实。
+band：green 正常 / yellow 需要注意 / red 需要处理。
+
+注意 points 里**没有** basis 字段 —— 依据不是你写的，是你引用的。`
+
 
 // ---------------------------------------------------------------------------
 // 入参校验
@@ -305,6 +319,17 @@ export function validateContext(raw: unknown): Record<string, unknown> | null {
     }
   }
 
+  // ---- facts ----
+  // 带编号的事实清单。模型只准引用它，依据由客户端用这里的原文渲染 ——
+  // 见 src/lib/aiContext.ts 的 AiFact。`text` 限 160 字：它是唯一一段
+  // 既进提示词、又会被原样显示给用户的字符串
+  const facts = takeArray(raw.facts, 40, (f) => {
+    const id = str(f.id, 8)
+    const text = str(f.text, 160)
+    if (id === null || text === null) return null
+    return { id, text }
+  })
+
   return {
     page,
     window,
@@ -316,6 +341,7 @@ export function validateContext(raw: unknown): Record<string, unknown> | null {
     findings,
     enough,
     derived,
+    facts,
   }
 }
 
