@@ -96,6 +96,49 @@ export interface AiAnalysis {
   caveat: string
 }
 
+/**
+ * 一次追问的回答。
+ *
+ * ============================================================================
+ * 【为什么 decline 是一等公民，而不是"失败"】
+ * ============================================================================
+ * 家属会问「我妈是不是得了关节炎」。这时候**正确的行为是拒答**，而不是
+ * 让合规闸门把它当垃圾丢掉 —— 后者在界面上表现成"AI 出错了"，用户会
+ * 换个说法再问一遍。
+ *
+ * 所以「答不了」有它自己的字段和它自己的界面样式（一句中性说明，不是红色
+ * 报错）。于是它成了**可以断言的行为**：
+ *
+ *   喂一个问题要求诊断 → answer 必须是空、decline 必须非空
+ *
+ * 而不是一句写在提示词里、没人验的君子协定。
+ * ============================================================================
+ */
+export interface AiAnswer {
+  /** 用户问的原话 */
+  question: string
+  /** 回答正文。**答不了时是空串** */
+  answer: string
+  /** 答不了时的一句说明（为什么答不了）。**答得了时是空串** */
+  decline: string
+  /** 回答里用到的数字来自哪几条事实 */
+  cites: string[]
+  /**
+   * 依据。和 `AiPoint.basis` 一样，**由 `cites` 指向的事实原文拼成**，
+   * 模型碰不到。拒答时为空串（没有依据可给）。
+   */
+  basis: string
+  /** 模型自述的局限 */
+  caveat: string
+}
+
+export interface AiAskResult {
+  /** 校验通过的回答。没通过时为 null */
+  answer: AiAnswer | null
+  /** 没通过时的中文原因 */
+  reason: string | null
+}
+
 export interface AiParseResult {
   /** 通过校验的内容。全部被拒时为 null */
   analysis: AiAnalysis | null
@@ -143,6 +186,28 @@ const MAX_POINTS = 4
 const MAX_CITES = 4
 
 const BANDS: readonly RiskBand[] = ['green', 'yellow', 'red']
+
+// ---------------------------------------------------------------------------
+// 追问的上下限
+// ---------------------------------------------------------------------------
+
+/** 问题长度上限。**这个是给输入框用的**，界面要按它做 maxlength */
+export const MAX_QUESTION_CHARS = 200
+
+/** 回答正文上限 */
+const MAX_ANSWER_CHARS = 400
+
+/** 拒答说明上限。短，因为它就是一句话 */
+const MAX_DECLINE_CHARS = 120
+
+/**
+ * 带几轮历史。
+ *
+ * ⚠️ 每一轮都要重发**全部**历史（和整份上下文），所以它直接乘在 token 成本上。
+ *    3 轮 ≈ 多 600~900 token。再多就该考虑把历史压缩成摘要了 —— 但现在
+ *    "家长里短问两句"也就两三轮，不值得为它引入一个摘要步骤。
+ */
+export const MAX_HISTORY_TURNS = 3
 
 // ---------------------------------------------------------------------------
 // 数字的规范化与提取
@@ -477,6 +542,118 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
     analysis: { summary, points, caveat },
     dropped: droppedReasons.length,
     droppedReasons,
+    reason: null,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 追问（多轮）
+// ---------------------------------------------------------------------------
+//
+// 与上面那次分析共用同一份 facts 和三道闸门，只有两点不同：
+//
+//   ① 多了一个 `decline` 出口 —— **答不了是一等公民，不是失败**（见 AiAnswer）
+//   ② 校验的对象是「回答」，不是「结论」—— 它不需要 band，也不需要 action
+//
+// ⚠️ **用户的问题本身不过合规闸门。** 「我妈是不是得了关节炎」这句里带病名，
+//    但那是用户说的，不是我们说的 —— 拦下来才是错的（拦下来家属只会换个
+//    说法再问一遍）。正确的处理是**让它答**，然后由回答里的 decline 出口
+//    拒掉。所以问题只限长度，不限内容。
+
+/**
+ * 解析并校验一次追问的回答。
+ *
+ * @param raw      模型返回的文本（应当是 JSON）
+ * @param ctx      与那次分析**同一份**上下文。事实清单必须一致，
+ *                 否则模型报的编号对不上
+ * @param question 用户问的原话（会被裁到 MAX_QUESTION_CHARS）
+ */
+export function parseAiAsk(
+  raw: unknown,
+  ctx: AiContext,
+  question: string,
+): AiAskResult {
+  const fail = (reason: string): AiAskResult => ({ answer: null, reason })
+
+  const q = question.trim().slice(0, MAX_QUESTION_CHARS)
+  if (!q) return fail('问题为空')
+
+  const text = typeof raw === 'string' ? raw.trim() : ''
+  if (!text) return fail('AI 没有返回内容')
+
+  let obj: unknown
+  try {
+    obj = JSON.parse(text)
+  } catch {
+    return fail('AI 返回的不是合法 JSON')
+  }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+    return fail('AI 返回的不是一个对象')
+  }
+
+  const o = obj as Record<string, unknown>
+  const rawAnswer = asString(o.answer).trim()
+  const decline = asString(o.decline).trim()
+
+  // 两个都空说明它什么也没给 —— 这不是"拒答"，是没答
+  if (!rawAnswer && !decline) return fail('AI 既没有回答也没有说明')
+
+  // ---- 出口①：拒答 ----
+  //
+  // 两个字段都填了的话按**保守**的那边读：它说答不了，那就是答不了
+  if (decline) {
+    if (decline.length > MAX_DECLINE_CHARS) return fail('拒答说明过长')
+
+    // ⚠️ 拒答说明**照样过合规闸门**。
+    //    「不能判断是不是关节炎」这种句子恰恰是要拦的 —— 它把一个病名
+    //    摆到了家属面前，哪怕是以否定的形式
+    const why = complianceIssue(decline)
+    if (why) return fail(`拒答说明本身越界：${why}`)
+
+    return {
+      answer: { question: q, answer: '', decline, cites: [], basis: '', caveat: '' },
+      reason: null,
+    }
+  }
+
+  // ---- 出口②：回答 ----
+  const cites = Array.isArray(o.cites)
+    ? o.cites
+        .filter((c): c is string => typeof c === 'string')
+        .slice(0, MAX_CITES)
+    : []
+  if (!cites.length) return fail('回答没有报 cites —— 说不出依据的答案不该显示')
+
+  const factById = new Map(ctx.facts.map((f) => [f.id, f]))
+  const cited: AiFact[] = []
+  for (const id of cites) {
+    const fact = factById.get(id)
+    if (fact) cited.push(fact)
+  }
+  if (cited.length !== cites.length) {
+    return fail(`引用了不存在的事实：${cites.join(',')}`)
+  }
+
+  // 数值闸门同样收紧到「你引用的那几条」。追问这条路径和结论那条一样严
+  const scoped = allowedNumbersForFacts(ctx, cited.map((f) => f.id))
+  const why = checkText(rawAnswer, scoped, MAX_ANSWER_CHARS, true)
+  if (why) return fail(`回答${why}`)
+
+  let caveat = ''
+  {
+    const c = asString(o.caveat).trim()
+    if (c && c.length <= MAX_CAVEAT_CHARS && !complianceIssue(c)) caveat = c
+  }
+
+  return {
+    answer: {
+      question: q,
+      answer: rawAnswer,
+      decline: '',
+      cites: cited.map((f) => f.id),
+      basis: cited.map((f) => f.text).join(' ｜ '),
+      caveat,
+    },
     reason: null,
   }
 }

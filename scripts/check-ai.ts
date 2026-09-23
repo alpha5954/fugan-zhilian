@@ -19,8 +19,10 @@ import { buildDemoSessions, buildDemoAlerts } from '../src/lib/demoData.ts'
 import { buildInsightContext, buildTrendContext, MAX_CONTEXT_CHARS } from '../src/lib/aiContext.ts'
 import {
   parseAiReply,
+  parseAiAsk,
   allowedNumbers,
   unmatchedNumber,
+  MAX_QUESTION_CHARS,
   type AiParseResult,
 } from '../src/lib/aiReply.ts'
 import {
@@ -840,6 +842,154 @@ console.log('='.repeat(70))
   if (files.length) {
     console.log(`  共回放 ${files.length} 份真实回复、${totalPoints} 条结论`)
   }
+}
+
+// ---------------------------------------------------------------------------
+// 11. 追问
+// ---------------------------------------------------------------------------
+// 这一组里最重要的是**拒答**那几条 —— 它是这个功能唯一会放大合规风险的
+// 地方（别处都是我们主动生成文本，这里是用户主动提问，可能问到病上）。
+//
+// 所以「答不了就说答不了」必须是**可断言的**，而不是提示词里一句没人验的
+// 叮嘱。下面第 3 条就是在验：模型该拒的时候拒了，客户端必须把它当作
+// **成功**收下，而不是当垃圾丢掉。
+console.log()
+console.log('='.repeat(70))
+console.log('11. 追问：回答、拒答、以及不许越界')
+console.log('='.repeat(70))
+
+{
+  const ctx = insightCtx()
+  const fact0 = ctx.facts[0]!
+  const numInFact0 = Number((fact0.text.match(/-?\d+(?:\.\d+)?/) ?? ['0'])[0])
+
+  // ---- ① 正常回答 ----
+  {
+    const raw = JSON.stringify({
+      answer: `该数值是 ${numInFact0}。`,
+      cites: [fact0.id],
+      decline: '',
+      caveat: '',
+    })
+    const r = parseAiAsk(raw, ctx, '这周怎么样')
+    check('正常回答通过', r.answer !== null, r.reason ?? '')
+    check('回答里带着问的原话', r.answer?.question === '这周怎么样')
+    check('answer 与 decline 恰好一个非空',
+      !!r.answer?.answer && !r.answer?.decline)
+    check(
+      '依据由事实原文拼成（不是模型写的）',
+      r.answer?.basis === fact0.text,
+      r.answer?.basis.slice(0, 30) ?? '',
+    )
+  }
+
+  // ---- ② ★ 拒答：必须是**通过**，不是失败 ----
+  //
+  // 家属问「我妈是不是得了关节炎」。模型填了 decline。
+  // 如果客户端把它当失败丢掉，界面上就只剩"AI 出错了" ——
+  // 用户会以为系统坏了，换个说法再问一遍。那正是要避免的。
+  {
+    const raw = JSON.stringify({
+      answer: '',
+      cites: [],
+      decline: '这类问题需要由医生判断，我不能根据训练数据回答。',
+      caveat: '',
+    })
+    const r = parseAiAsk(raw, ctx, '我妈是不是得了关节炎')
+    check(
+      '★ 拒答被当作**成功**收下（不是失败）',
+      r.answer !== null && r.reason === null,
+      r.reason ?? '',
+    )
+    check('拒答时 answer 是空串', r.answer?.answer === '')
+    check('拒答说明被保留', (r.answer?.decline ?? '').length > 0)
+    check('拒答没有依据（本来就没有可给的）', r.answer?.basis === '')
+  }
+
+  // ---- ③ ★ 拒答说明自己不许带病名 ----
+  //
+  // 「不能判断是不是关节炎」这种句子恰恰要拦 —— 它把病名摆到家属面前了，
+  // 哪怕是以否定的形式。这是提示词里专门叮嘱过、也专门断言的一条
+  {
+    const raw = JSON.stringify({
+      answer: '',
+      cites: [],
+      decline: '不能判断是不是关节炎，建议就医。',
+      caveat: '',
+    })
+    const r = parseAiAsk(raw, ctx, '我妈是不是得了关节炎')
+    check(
+      '★ 拒答说明里带病名 → 被拒',
+      r.answer === null && r.reason !== null,
+      r.reason ?? '',
+    )
+  }
+
+  // ---- ④ 形状 ----
+  const shapeCases: [string, string][] = [
+    ['两个字段都空', JSON.stringify({ answer: '', cites: [], decline: '', caveat: '' })],
+    ['缺 cites', JSON.stringify({ answer: '这周训练了 7 天。', decline: '' })],
+    ['cites 是空数组', JSON.stringify({ answer: '这周训练了 7 天。', cites: [], decline: '' })],
+    ['引用了不存在的事实', JSON.stringify({ answer: '还行。', cites: ['F99'], decline: '' })],
+    ['截断的 JSON', '{"answer":"还不错"'],
+    ['不是对象', '[]'],
+  ]
+  for (const [name, raw] of shapeCases) {
+    const r = parseAiAsk(raw, ctx, '这周怎么样')
+    check(`${name} → 被拒`, r.answer === null, r.reason ?? '竟然通过了')
+  }
+
+  check(
+    '空问题 → 被拒（不必浪费一次调用）',
+    parseAiAsk(JSON.stringify({ answer: 'x', cites: [fact0.id], decline: '' }), ctx, '  ').answer === null,
+  )
+
+  // ---- ⑤ 数值仍然收紧在引用范围内 ----
+  {
+    const raw = JSON.stringify({
+      answer: '整体提升了 237%。',
+      cites: [fact0.id],
+      decline: '',
+      caveat: '',
+    })
+    check(
+      '回答里编造的数值 → 被拒',
+      parseAiAsk(raw, ctx, '有进步吗').answer === null,
+    )
+  }
+
+  // ---- ⑥ 两个都填 → 按保守的读 ----
+  {
+    const raw = JSON.stringify({
+      answer: '这周还不错。',
+      cites: [fact0.id],
+      decline: '这个问题我答不了。',
+      caveat: '',
+    })
+    const r = parseAiAsk(raw, ctx, '怎么样')
+    check(
+      '两个都填时按**拒答**读（保守优先）',
+      r.answer !== null && r.answer.answer === '' && r.answer.decline.length > 0,
+      r.answer ? `answer="${r.answer.answer}" decline="${r.answer.decline}"` : (r.reason ?? ''),
+    )
+  }
+
+  // ---- ⑦ 上限 ----
+  {
+    const long = JSON.stringify({
+      answer: '好'.repeat(500),
+      cites: [fact0.id],
+      decline: '',
+      caveat: '',
+    })
+    check('超长回答 → 被拒', parseAiAsk(long, ctx, '怎么样').answer === null)
+  }
+
+  check(
+    `问题长度上限是 ${MAX_QUESTION_CHARS}`,
+    MAX_QUESTION_CHARS === 200,
+    `${MAX_QUESTION_CHARS}`,
+  )
 }
 
 // ---------------------------------------------------------------------------

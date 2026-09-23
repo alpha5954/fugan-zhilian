@@ -33,7 +33,13 @@ import { computed, ref } from 'vue'
 import { AI_CACHE_STORAGE_KEY, readCache, writeCache } from '@/lib/aiCache'
 import { AI_ERROR_MESSAGES, aiErrorInfo } from '@/lib/aiErrors'
 import type { AiContext } from '@/lib/aiContext'
-import { parseAiReply, type AiParseResult } from '@/lib/aiReply'
+import {
+  MAX_QUESTION_CHARS,
+  parseAiAsk,
+  parseAiReply,
+  type AiAnswer,
+  type AiParseResult,
+} from '@/lib/aiReply'
 import { aiAccess, type AiPlan } from '@/lib/entitlements'
 import { supabase } from '@/lib/supabase'
 
@@ -170,6 +176,10 @@ export const useAiStore = defineStore('ai', () => {
       result.value = null
       resultKey.value = null
       error.value = null
+      // 追问也要清 —— 换了窗口/换了人之后，下面那几轮问答说的是**另一份
+      // 数据**，留着比没有更糟（和分析结果同一个理由）
+      turns.value = []
+      askError.value = null
     }
     return false
   }
@@ -257,6 +267,90 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   /** 切换查看对象 / 登出时调用。缓存和失败态一起清掉 */
+  // ---------------------------------------------------------------------------
+  // 追问
+  // ---------------------------------------------------------------------------
+  //
+  // ⚠️ 追问**不进 localStorage**，只活在本次会话里。
+  //
+  //    理由有两条，第二条是主要的那条：
+  //      ① 每个问题多半只问一次，缓存命中率极低，存了也没用
+  //      ② 对话是**无界**的。存进 localStorage 迟早撑爆配额，而
+  //         lib/errorHandlers.ts 里那个去重 Map 就是因为无界增长出过事。
+  //         一次分析的 result 有上限（一条），对话没有。
+  //
+  //    代价是刷新会丢掉追问记录。可以接受 —— 分析结果还在，接着问就是了。
+
+  /** 这一轮上下文的追问记录 */
+  const turns = ref<AiAnswer[]>([])
+  const asking = ref(false)
+  /** 追问失败。与 error 分开 —— 一次追问失败不该把上面那份分析也标红 */
+  const askError = ref<string | null>(null)
+
+  /**
+   * 就着当前这份分析追问一句。
+   *
+   * 走的是同一个 Edge Function、同一份 facts、同一套闸门，
+   * 只是多带一个 `mode: 'ask'`。
+   */
+  async function ask(ctx: AiContext, question: string): Promise<void> {
+    if (!access.value.allowed) {
+      askError.value = access.value.reason
+      return
+    }
+
+    const q = question.trim().slice(0, MAX_QUESTION_CHARS)
+    if (!q) return
+    if (asking.value) return
+
+    if (calls >= MAX_CALLS_PER_SESSION) {
+      askError.value = '本次使用中 AI 分析的次数已达上限，请刷新页面后重试'
+      return
+    }
+
+    asking.value = true
+    askError.value = null
+    calls++
+
+    try {
+      const { data, error: err } = await supabase.functions.invoke(FUNCTION_NAME, {
+        body: {
+          mode: 'ask',
+          context: ctx,
+          question: q,
+          // 每轮重发全部历史。上限由 MAX_HISTORY_TURNS 封着 ——
+          // 它直接乘在 token 成本上
+          history: turns.value.map((t) => ({
+            q: t.question,
+            // 拒答也是一种回答，历史里要带上，否则下一轮模型会以为
+            // 自己上次没吭声，可能把同一个问题重答一遍
+            a: t.answer || t.decline,
+          })),
+        },
+        timeout: REQUEST_TIMEOUT_MS,
+      })
+
+      if (err) throw err
+
+      const text = (data as { text?: unknown } | null)?.text
+      if (typeof text !== 'string' || !text) {
+        throw new Error(AI_ERROR_MESSAGES.empty)
+      }
+
+      const r = parseAiAsk(text, ctx, q)
+      if (!r.answer) {
+        // 闸门拒了 —— 说清原因，别假装成功
+        askError.value = r.reason
+        return
+      }
+      turns.value.push(r.answer)
+    } catch (e) {
+      askError.value = await aiErrorInfo(e)
+    } finally {
+      asking.value = false
+    }
+  }
+
   function reset(): void {
     cache = null
     inflight = null
@@ -265,6 +359,9 @@ export const useAiStore = defineStore('ai', () => {
     resultKey.value = null
     error.value = null
     loading.value = false
+    turns.value = []
+    asking.value = false
+    askError.value = null
   }
 
   return {
@@ -277,6 +374,11 @@ export const useAiStore = defineStore('ai', () => {
     access,
     analyze,
     restore,
+    // 追问
+    turns,
+    asking,
+    askError,
+    ask,
     reset,
   }
 })

@@ -39,6 +39,7 @@ import { Info, Lock, RefreshCw, Sparkles } from 'lucide-vue-next'
 import FindingCard from './FindingCard.vue'
 import { useAiStore } from '@/stores/ai'
 import type { AiContext } from '@/lib/aiContext'
+import { MAX_QUESTION_CHARS } from '@/lib/aiReply'
 import type { FindingLike } from '@/lib/findings'
 
 const props = withDefaults(
@@ -154,6 +155,32 @@ watch(
     if (!ai.loading) ai.restore(props.context)
   },
 )
+
+// ---------------------------------------------------------------------------
+// 追问
+// ---------------------------------------------------------------------------
+
+const draft = ref('')
+const canAsk = computed(
+  () =>
+    !!props.context &&
+    showResult.value &&
+    !ai.asking &&
+    draft.value.trim().length > 0,
+)
+
+async function send(): Promise<void> {
+  if (!props.context || !canAsk.value) return
+
+  const q = draft.value.trim()
+  const before = ai.turns.length
+
+  // 先清空输入框是聊天的常规手感。失败了再放回去 ——
+  // 让用户重打一遍自己刚写的问题是最没必要的一种刁难
+  draft.value = ''
+  await ai.ask(props.context, q)
+  if (ai.turns.length === before) draft.value = q
+}
 </script>
 
 <template>
@@ -243,6 +270,55 @@ watch(
           <!-- 重新生成 = 再花一次钱。所以它绕开缓存，见 regenerate 的注释 -->
           <el-button size="small" text @click="regenerate">重新生成</el-button>
         </div>
+      </div>
+
+      <!-- ============ 追问 ============ -->
+      <!-- 只在**已经有分析结果**之后才出现。没有事实清单就没有可追问的依据，
+           问了也只能得到模型凭常识编的东西 -->
+      <div v-if="showResult" class="ask">
+        <ul v-if="ai.turns.length" class="asklist">
+          <li v-for="(t, i) in ai.turns" :key="i" class="asklist__item">
+            <p class="asklist__q">{{ t.question }}</p>
+
+            <p v-if="t.answer" class="asklist__a">{{ t.answer }}</p>
+
+            <!-- ⚠️ 拒答**不是错误样式**。它是这套东西刻意设计的一个出口 ——
+                 涉及疾病判断的问题就该明说答不了，而不是绕着答。
+                 用红色报错的样子显示它，用户会以为系统坏了、然后换个说法再问 -->
+            <p v-else class="asklist__decline">
+              <Info class="asklist__icon" aria-hidden="true" />
+              {{ t.decline }}
+            </p>
+
+            <p v-if="t.basis" class="asklist__basis">依据：{{ t.basis }}</p>
+          </li>
+        </ul>
+
+        <div class="askbar">
+          <el-input
+            v-model="draft"
+            :maxlength="MAX_QUESTION_CHARS"
+            placeholder="就这份数据问一句，例如「下周该加量吗」"
+            :disabled="ai.asking"
+            @keyup.enter="send"
+          />
+          <el-button
+            type="primary"
+            :loading="ai.asking"
+            :disabled="!canAsk"
+            @click="send"
+          >
+            追问
+          </el-button>
+        </div>
+
+        <p v-if="ai.askError" class="ask__error">{{ ai.askError }}</p>
+
+        <p class="ai__hint">
+          <Info class="ai__hint-icon" aria-hidden="true" />
+          只依据上面这份数据回答。涉及疾病判断、用药、手术的问题它会明说答不了
+          —— 那是设计如此，不是出错。
+        </p>
       </div>
     </template>
   </section>
@@ -419,6 +495,93 @@ watch(
   margin: 0;
   font-size: 13px;
   color: var(--ink-500);
+}
+
+/* ---- 追问 ---- */
+
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.asklist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.asklist__item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.asklist__q {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--ink-700);
+}
+
+/* 前缀标出哪句是问的 —— 一问一答挨着放，不加标记容易读混 */
+.asklist__q::before {
+  content: '问 ';
+  color: var(--ink-300);
+}
+
+.asklist__a {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+  color: var(--ink-800);
+}
+
+/* ⚠️ 拒答用**中性**样式，不是报错的红色。理由见模板里那段注释 */
+.asklist__decline {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+  color: var(--ink-500);
+}
+
+.asklist__icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+.asklist__basis {
+  margin: 1px 0 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-base);
+  color: var(--ink-400);
+}
+
+.askbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.askbar :deep(.el-input) {
+  flex: 1;
+}
+
+.ask__error {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-base);
+  color: var(--danger);
 }
 
 /* ============================================================================
