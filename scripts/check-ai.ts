@@ -959,6 +959,34 @@ console.log('='.repeat(70))
     )
   }
   {
+    // 第二次误杀（改了「用药」之后又冒出来的）：模型拒答涉病问题时写
+    // 「这涉及疾病诊断，需要由医生判断」—— 而「诊断」被当成"在下诊断"拦了。
+    // 规律是：「诊断」「用药」「手术」是**类别词**，「关节炎」是**具体病名**
+    const raw = JSON.stringify({
+      answer: '',
+      cites: [],
+      decline: '这涉及疾病诊断，需要由医生判断。',
+      caveat: '',
+    })
+    check(
+      '★ 拒答里出现「诊断」→ 放行（它是在拒绝下诊断）',
+      parseAiAsk(raw, ctx, '我妈是不是得了关节炎').answer !== null,
+    )
+  }
+  {
+    // 反方向：**回答**里说「诊断为…」仍然要拦 —— 那才是真的在下诊断
+    const raw = JSON.stringify({
+      answer: '综合来看可以诊断为活动受限。',
+      cites: [fact0.id],
+      decline: '',
+      caveat: '',
+    })
+    check(
+      '回答里出现「诊断」→ 仍然被拒',
+      parseAiAsk(raw, ctx, '怎么样').answer === null,
+    )
+  }
+  {
     // 反方向：**回答**里出现类别词仍然要拦 —— 那是真的在给方案
     const raw = JSON.stringify({
       answer: '建议先用药观察。',
