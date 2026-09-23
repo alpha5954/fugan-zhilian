@@ -24,7 +24,7 @@
 // 当固定用例（那才是"改了之后有没有变差"的基线）。
 // ============================================================================
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 
 import { buildInsightContext, buildTrendContext } from '../src/lib/aiContext.ts'
 import { parseAiReply, allowedNumbers } from '../src/lib/aiReply.ts'
@@ -164,7 +164,45 @@ if (r.analysis.caveat) console.log(`\n局限：${r.analysis.caveat}`)
 
 console.log()
 if (r.dropped === 0) {
-  console.log('✓ 零误杀。把这次的 /tmp 原文存下来，可以当 check-ai.ts 的基线用例。')
+  console.log('✓ 零误杀。')
 } else {
   console.log(`⚠️ 有 ${r.dropped} 条没过 —— 看上面那些"未通过校验"的日志找原因。`)
+}
+
+// ---------------------------------------------------------------------------
+// 存成 fixture（--save <名字>）
+// ---------------------------------------------------------------------------
+// 存的是**上下文 + 回复原文**两份，所以回放时不需要联网、也不受运行日期影响
+// —— 演示数据是按当天生成的，只存回复的话，第二天回放用的就是另一份上下文，
+// 数字全对不上，用例会莫名其妙地红。
+//
+// 存下来的东西进了仓库，就成了 check-ai.ts 里那一组的基线：
+// **以后再收紧闸门，把手写用例放过去、却把真实回复拒掉，那里会红。**
+
+const saveIdx = process.argv.indexOf('--save')
+if (saveIdx >= 0) {
+  const name = process.argv[saveIdx + 1] ?? `${page}-${Date.now()}`
+  const file = new URL(`./fixtures/ai-replies/${name}.json`, import.meta.url)
+  writeFileSync(
+    file,
+    JSON.stringify(
+      {
+        name,
+        note: `${new Date().toISOString().slice(0, 10)} 打的真实调用（${page}）`,
+        context: ctx,
+        text: body.text,
+        meta: {
+          model: body.model,
+          elapsedMs: elapsed,
+          usage: body.usage,
+          droppedOnCapture: r.dropped,
+        },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+  console.log(`已存 fixture：scripts/fixtures/ai-replies/${name}.json`)
+  console.log('  它现在会进 npm run check 的「真实回复回放」那一组。')
 }

@@ -10,6 +10,8 @@
 //
 // 反过来也要钉：合法回复**必须能通过**。闸门太严的话功能等于没有，
 // 而那种失败是静默的 —— 页面上只会少一句话，不会报错。
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+
 import { buildInsight } from '../src/lib/insight.ts'
 import { buildTrendReport } from '../src/lib/trend.ts'
 import { summarize } from '../src/lib/analysis.ts'
@@ -468,8 +470,8 @@ console.log('='.repeat(70))
   const r3 = parseAiReply(two, ctx)
   check('引用两条事实 → 通过', r3.analysis !== null, r3.reason ?? '')
   check(
-    '两条的依据用；拼在一起',
-    (r3.analysis?.points[0]?.basis ?? '').includes('；'),
+    '两条的依据按全角竖线拼在一起',
+    (r3.analysis?.points[0]?.basis ?? '').includes(' ｜ '),
     r3.analysis?.points[0]?.basis.slice(0, 50) ?? '',
   )
 
@@ -735,6 +737,109 @@ console.log('='.repeat(70))
   )
 
   check('存储键带版本号', /^fugan\.ai\.v\d+$/.test(AI_CACHE_STORAGE_KEY), AI_CACHE_STORAGE_KEY)
+}
+
+// ---------------------------------------------------------------------------
+// 10. 真实回复回放
+// ---------------------------------------------------------------------------
+// ============================================================================
+// 【为什么手写用例不够，非得有这一组】
+// ============================================================================
+// 上面 1~9 节喂的全是**我自己造的**回复。它们证明的是"闸门逻辑对"，
+// 证明不了"真实回复能过" —— 而这两件事在 2026-09-24 那天被证明是分开的：
+//
+//   提示词改完 `npm run check` 全绿，打真实接口却发现三条结论全被丢弃。
+//   接着又连着抓出两个真 bug（带符号数值被当幻觉、MAX_CITES 定太紧）。
+//
+// fixtures 里存的是**真实调用**的上下文原文 + 模型回复原文。回放不需要
+// 联网、不受运行日期影响（演示数据是按当天生成的，所以上下文必须一起冻住）。
+//
+// ⚠️ **往后收紧闸门时，这一组是唯一能拦住"误杀真实回复"的东西。**
+//    手写用例会跟着闸门一起改，所以它永远不会红。
+//
+// 攒新样本：`node scripts/try-ai.ts --save <名字>`
+//
+// ----------------------------------------------------------------------------
+// ⚠️ 这一组**挡不住**什么（反测过，不是猜的）
+// ----------------------------------------------------------------------------
+// 2026-09-24 用"临时改坏一处、看它红不红"的办法量了它的覆盖范围：
+//
+//   改坏 `MAX_CITES` 4→3          → **没红**。真实回复里那些四条引用的结论，
+//                                   去掉一条之后剩下的仍覆盖了正文里的数字
+//   把数值容差改成 0（精确匹配）    → **没红**。真实回复是逐字抄的，
+//                                   根本用不到容差（低温度 + 提示词里那句
+//                                   "逐字复制"在起作用）
+//   要求每条至少引用 2 条事实       → **红了**，而且把三条的原因都打了出来
+//
+// 结论：它守的是**灾难性漂移**（提示词改坏、模型不再报 cites、闸门整体变严
+// 到真实输出全被拒）—— 也就是 9-24 那天真实发生过的那种。
+// 它守不住**细微**的闸门改动，因为真实回复恰好不经过那些分支。
+//
+// 另外：**上下文是冻在 fixture 里的，所以改 aiContext.ts 这一组完全看不到。**
+// 那部分由第 1~3 节和 `try-ai.ts` 的真实调用来守。
+// ============================================================================
+console.log()
+console.log('='.repeat(70))
+console.log('10. 真实回复回放（fixtures 里存的是真的模型输出）')
+console.log('='.repeat(70))
+
+{
+  const dir = new URL('./fixtures/ai-replies/', import.meta.url)
+  const files = existsSync(dir)
+    ? readdirSync(dir)
+        .filter((f) => f.endsWith('.json'))
+        .sort()
+    : []
+
+  if (!files.length) {
+    console.log('  （还没有 fixture。跑 node scripts/try-ai.ts --save <名字> 攒一个）')
+  }
+
+  let totalPoints = 0
+
+  for (const f of files) {
+    let fx: { name?: string; note?: string; context?: AiContext; text?: string }
+    try {
+      fx = JSON.parse(readFileSync(new URL(f, dir), 'utf8'))
+    } catch (e) {
+      check(`${f} 能解析`, false, String(e))
+      continue
+    }
+
+    if (!fx.context || typeof fx.text !== 'string') {
+      check(`${f} 结构完整（要含 context 与 text）`, false)
+      continue
+    }
+
+    const r = parseAiReply(fx.text, fx.context)
+    totalPoints += r.analysis?.points.length ?? 0
+
+    check(
+      `${f}（${fx.note ?? ''}）零丢弃`,
+      r.dropped === 0 && r.analysis !== null,
+      r.dropped
+        ? `丢了 ${r.dropped} 条：${r.droppedReasons.join(' ｜ ')}`
+        : `通过 ${r.analysis?.points.length ?? 0} 条`,
+    )
+
+    // 真实回复里的依据必须全部是**我们渲染的**事实原文 ——
+    // 也就是说模型自己写的任何文字都不该出现在那一行里。
+    //
+    // ⚠️ 判据是"逐条事实都是它的子串"，不是"按分隔符切开比对"。
+    //    事实文本自己含分号，切开就对不上了 —— 第一版就是这么写错的。
+    const byId = new Map(fx.context.facts.map((x) => [x.id, x.text]))
+    const basesOk = (r.analysis?.points ?? []).every((p) =>
+      p.cites.every((id) => {
+        const text = byId.get(id)
+        return typeof text === 'string' && p.basis.includes(text)
+      }),
+    )
+    check(`${f} 的依据全部由事实原文拼成`, basesOk)
+  }
+
+  if (files.length) {
+    console.log(`  共回放 ${files.length} 份真实回复、${totalPoints} 条结论`)
+  }
 }
 
 // ---------------------------------------------------------------------------

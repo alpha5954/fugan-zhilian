@@ -169,7 +169,7 @@ GitHub Pages 是静态托管，**不支持 SPA 回退**：直接访问 `/fugan-z
 ## 逻辑自检
 
 ```bash
-npm run check                # 全部（490 项）
+npm run check                # 全部（494 项）
 npm run check:simulator      # 信号模拟器的物理关系、过热事件、信号丢失（21 项）
 npm run check:assessment     # 康复评估的指标计算与入库数据（47 项）
 npm run check:analysis       # 数据分析的聚合逻辑（34 项）
@@ -178,7 +178,7 @@ npm run check:auth           # 认证回调识别、地址栏清理与错误码�
 npm run check:insight        # 恢复评分、风险分级与建议生成（108 项）
 npm run check:findings       # 评估结论：合规措辞、排序、与历史对比（39 项）
 npm run check:trend          # 进展结论：方向、静力动作口径、达标余量、数据不足（70 项）
-npm run check:ai             # AI 层：上下文隐私、三道闸门、引用归属、本地缓存（89 项）
+npm run check:ai             # AI 层：上下文隐私、三道闸门、引用归属、本地缓存、真实回复回放（93 项）
 npm run check:ai-function    # Edge Function 的入参校验与提示词（39 项）
 ```
 
@@ -1449,6 +1449,47 @@ AI 的输出在**上屏之前**要过三道闸门（`src/lib/aiReply.ts`）。�
 
 `max_tokens` 封的是**输出**，输入没人管 —— 分析页一次取 500 条记录，不做截断
 很容易把 token 成本推上去。
+
+### ⚠️ 手写用例证明不了真实链路 —— 必须打真的
+
+2026-09-24 那天最值钱的一个教训：
+
+> 提示词改完 `npm run check` **全绿**，打真实接口发现**三条结论全被丢弃**。
+
+因为 `check-ai.ts` 里喂的全是**我自己造的**合规回复。它证明的是"闸门逻辑
+对"，证明不了"模型会照做"。接着连着抓出两个真 bug（带符号数值被当幻觉、
+`MAX_CITES` 定太紧整条作废）—— 手写用例一个都没照出来。
+
+所以有两样东西：
+
+**`scripts/try-ai.ts`** —— 打一次真实的调用并过闸门，报告耗时、token、
+丢弃条数与逐条原因。**它不在 `npm run check` 里**（联网、花钱，而那个链条
+每次提交都跑还卡着部署）。
+
+```bash
+node scripts/try-ai.ts                    # 概览页
+node scripts/try-ai.ts analysis           # 数据分析页
+node scripts/try-ai.ts --save <名字>       # 顺便存成回放 fixture
+```
+
+**改动提示词或 temperature 之后必须跑它。**
+
+**`scripts/fixtures/ai-replies/`** —— 真实调用的**上下文原文 + 回复原文**
+（两份一起存，因为演示数据按当天生成，只存回复的话第二天数字全对不上）。
+`check-ai.ts` 第 10 节回放它们，不联网。
+
+反测过它的覆盖范围（临时改坏一处、看它红不红）：
+
+| 改坏什么 | 结果 |
+|---|---|
+| `MAX_CITES` 4→3 | 没红 —— 真实回复去掉一条引用后，剩下的仍覆盖正文数字 |
+| 数值容差改成 0 | 没红 —— 真实回复是逐字抄的，用不到容差 |
+| 要求每条至少引用 2 条 | **红了**，并把三条的原因全打出来 |
+
+所以它守的是**灾难性漂移**（提示词改坏、模型不再报 cites、闸门严到真实输出
+全被拒）—— 也就是那天真实发生过的那种；守不住细微的闸门改动。
+另外**上下文冻在 fixture 里，所以改 `aiContext.ts` 它完全看不到**，
+那部分由第 1~3 节和 `try-ai.ts` 守。
 
 ### 参数在哪
 

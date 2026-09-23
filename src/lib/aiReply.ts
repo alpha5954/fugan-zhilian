@@ -422,8 +422,12 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
       continue
     }
 
-    // ★ 依据由**我们**渲染。模型的原始文本进不了这一行
-    const basis = cited.map((f) => f.text).join('；')
+    // ★ 依据由**我们**渲染。模型的原始文本进不了这一行。
+    //
+    // ⚠️ 分隔符不能用「；」—— 事实文本自己就含分号（规则层的 evidence 里
+    //    那种「直腿抬高 9.3° → 11.4°；坐位伸膝 60.4° → 72.9°」），
+    //    拼起来分不清哪里是一条事实的结尾。用全角竖线当中缝。
+    const basis = cited.map((f) => f.text).join(' ｜ ')
 
     // ★ 数值闸门收紧到「你引用的那几条事实里」。理由见 allowedNumbersForFacts
     const scoped = allowedNumbersForFacts(ctx, cited.map((f) => f.id))
