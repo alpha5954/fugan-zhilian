@@ -169,7 +169,7 @@ GitHub Pages 是静态托管，**不支持 SPA 回退**：直接访问 `/fugan-z
 ## 逻辑自检
 
 ```bash
-npm run check                # 全部（551 项）
+npm run check                # 全部（553 项）
 npm run check:simulator      # 信号模拟器的物理关系、过热事件、信号丢失（21 项）
 npm run check:assessment     # 康复评估的指标计算与入库数据（47 项）
 npm run check:analysis       # 数据分析的聚合逻辑（34 项）
@@ -178,7 +178,7 @@ npm run check:auth           # 认证回调识别、地址栏清理与错误码�
 npm run check:insight        # 恢复评分、风险分级与建议生成（108 项）
 npm run check:findings       # 评估结论：合规措辞、排序、与历史对比（39 项）
 npm run check:trend          # 进展结论：方向、静力动作口径、达标余量、数据不足（70 项）
-npm run check:ai             # AI 层：闸门、引用归属、追问与拒答、本地缓存、真实回复回放（118 项）
+npm run check:ai             # AI 层：闸门、引用归属、追问与拒答、本地缓存、真实回复回放（120 项）
 npm run check:ai-function    # Edge Function 的入参校验与提示词，含追问与语气（71 项）
 ```
 
