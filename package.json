@@ -15,7 +15,9 @@
     "check:insight": "node scripts/check-insight.ts",
     "check:findings": "node scripts/check-findings.ts",
     "check:trend": "node scripts/check-trend.ts",
-    "check": "npm run check:simulator && npm run check:assessment && npm run check:analysis && npm run check:alerts && npm run check:auth && npm run check:insight && npm run check:findings && npm run check:trend"
+    "check:ai": "node scripts/check-ai.ts",
+    "check:ai-function": "node scripts/check-ai-function.ts",
+    "check": "npm run check:simulator && npm run check:assessment && npm run check:analysis && npm run check:alerts && npm run check:auth && npm run check:insight && npm run check:findings && npm run check:trend && npm run check:ai && npm run check:ai-function"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

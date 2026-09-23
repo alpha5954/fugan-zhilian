@@ -1,0 +1,404 @@
+<script setup lang="ts">
+// ============================================================================
+// AI 深度分析面板
+// ============================================================================
+// 概览页与数据分析页共用。放在规则结论**旁边**，不混进去。
+//
+// 【为什么强调"不混进去"】
+// 规则结论是这个系统的立身之本 —— 每一条都能展开讲清依据、答辩时经得起
+// 追问。AI 那段话是**另一回事**：它能说出规则层没说的东西，但那种话的
+// 依据是模型生成的，不能和可核对的结论长成一个样子。
+//
+// 所以：共用 FindingCard 的视觉语言（不新做一套，免得同一个东西在两处
+// 看起来是两个等级），但**外壳、来源标签、标题全部区分开**。用户要能一眼
+// 看出"这块是模型说的"。
+//
+// ============================================================================
+// 【按需触发，不在挂载时自动调用】
+// ============================================================================
+// 一次调用 5~20 秒而且按量计费。挂载就跑的话，每次打开页面都要等、都要花钱，
+// 而多数时候用户并不想看这段。所以是一个按钮。
+//
+// ============================================================================
+// ⚠️ 打印规则必须写在这个组件自己的 scoped style 里
+// ============================================================================
+// 分析页的 `.no-print` 定义在 Analysis.vue 的 <style scoped> 里，编译出来是
+// `.no-print[data-v-父]`。**子组件模板里的元素拿不到父组件的 data-v**，
+// 所以那条规则对这里面的元素根本不匹配 —— AI 内容会直接印进导出的 PDF。
+//
+// 靠给组件写 class 让它透传到根节点能侥幸生效，但多根节点或 inheritAttrs
+// 一改就静默失效，而且只有打开打印预览才看得见。所以自带一份。
+//
+// 顺带一个决定：**v1 的 AI 内容不进 PDF**。那份 PDF 是要递出去的，把未经
+// 核验的模型输出印在一份给临床医生看的报告里，正是 lib/findings.ts 那段
+// 合规边界存在的理由。
+// ============================================================================
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { Info, Lock, RefreshCw, Sparkles } from 'lucide-vue-next'
+
+import FindingCard from './FindingCard.vue'
+import { useAiStore } from '@/stores/ai'
+import type { AiContext } from '@/lib/aiContext'
+import type { FindingLike } from '@/lib/findings'
+
+const props = withDefaults(
+  defineProps<{
+    /** 页面正在显示的那份数据构造出来的上下文。数据还没到位时为 null */
+    context: AiContext | null
+    /**
+     * 默认展开吗。
+     *
+     * 概览页传 false —— 那是所有访客的落地页，折叠起来既保住功能曝光，
+     * 又不会让每个路过的人都点一次（点一次就是一次计费）。
+     */
+    defaultOpen?: boolean
+  }>(),
+  { defaultOpen: true },
+)
+
+const ai = useAiStore()
+const open = ref(props.defaultOpen)
+
+// ---------------------------------------------------------------------------
+// 等待秒数
+// ---------------------------------------------------------------------------
+// 10~20 秒没有任何反馈的按钮，用户会读成"坏了"，然后反复点。
+// 所以把已经等了几秒显示出来 —— 这个项目的品味是"不做流光扫过"（那类动画
+// 在医疗界面上显得轻浮），显示一个诚实的秒数更合适。
+const elapsed = ref(0)
+let timer: ReturnType<typeof setInterval> | null = null
+
+watch(
+  () => ai.loading,
+  (busy) => {
+    if (timer) {
+      clearInterval(timer)
+      timer = null
+    }
+    if (!busy) return
+    elapsed.value = 0
+    timer = setInterval(() => (elapsed.value += 1), 1000)
+  },
+)
+
+onBeforeUnmount(() => {
+  if (timer) clearInterval(timer)
+  // 刻意**不**取消请求：请求归 store 所有，已经发出去了、钱已经花了。
+  // 取消只会让人回来时白等一次
+})
+
+// ---------------------------------------------------------------------------
+// 状态
+// ---------------------------------------------------------------------------
+
+/**
+ * 当前上下文对应的 key。
+ *
+ * 与 store 里的算法保持一致（JSON 字符串就是 key）。用来判断"现在展示的
+ * 结果是不是这一份数据的" —— 换了筛选窗口之后，上一份结果不能继续挂在
+ * 下面冒充当前窗口的结论。
+ */
+const currentKey = computed(() => (props.context ? JSON.stringify(props.context) : null))
+
+const showResult = computed(
+  () => !!ai.result && ai.resultKey === currentKey.value && !!ai.analysis,
+)
+
+/** 结果里的条目换到 FindingCard 认识的字段名 */
+const points = computed<FindingLike[]>(() =>
+  (ai.analysis?.points ?? []).map((p) => ({
+    label: p.text,
+    band: p.band,
+    // ⚠️ 这里是从 basis 换名过来的 —— 它是 **AI 声称的**依据，
+    //    不是系统算出来的 evidence。字段名刻意不同，就是为了不让人
+    //    在代码里把两者当成一回事
+    evidence: p.basis,
+    action: p.action,
+  })),
+)
+
+const canRun = computed(() => !!props.context && ai.access.allowed)
+
+function run(): void {
+  if (!props.context || ai.loading) return
+  void ai.analyze(props.context)
+}
+</script>
+
+<template>
+  <section class="ai" :class="{ 'ai--open': open }">
+    <header class="ai__head">
+      <button
+        type="button"
+        class="ai__toggle"
+        :aria-expanded="open"
+        @click="open = !open"
+      >
+        <Sparkles class="ai__icon" aria-hidden="true" />
+        <span class="ai__title">AI 深度分析</span>
+        <span class="ai__tag">AI 生成</span>
+        <span class="ai__chev">{{ open ? '收起' : '展开' }}</span>
+      </button>
+      <span class="ai__window">
+        {{ context ? `${context.window} · 由模型解读，非系统结论` : '数据加载中' }}
+      </span>
+    </header>
+
+    <template v-if="open">
+      <!-- ============ 还没开放（将来收费后的状态） ============
+           这一态现在就写。等上线付费再补的话，界面会先经历一段
+           "点了没反应"的时间，而那时候已经不能改了 -->
+      <div v-if="!ai.access.allowed" class="ai__upsell">
+        <Lock class="ai__upsell-icon" aria-hidden="true" />
+        <p class="ai__upsell-text">{{ ai.access.reason }}</p>
+      </div>
+
+      <!-- ============ 未触发 / 加载中 ============ -->
+      <div v-else-if="!showResult" class="ai__actions">
+        <el-button
+          type="primary"
+          :loading="ai.loading"
+          :disabled="!canRun"
+          @click="run"
+        >
+          {{ ai.loading ? `正在分析…已等待 ${elapsed} 秒` : '用 AI 深入分析' }}
+        </el-button>
+
+        <p class="ai__hint">
+          <Info class="ai__hint-icon" aria-hidden="true" />
+          系统会把聚合后的训练指标发送给 AI 服务用于本次分析。约需 5~10 秒。
+        </p>
+      </div>
+
+      <!-- ============ 失败 ============ -->
+      <div v-if="ai.error && !ai.loading" class="ai__error">
+        <p class="ai__error-text">{{ ai.error }}</p>
+        <el-button size="small" @click="run">
+          <RefreshCw class="ai__btn-icon" aria-hidden="true" />
+          重试
+        </el-button>
+        <p class="ai__hint">
+          这一块不影响上面的评估结论 —— 那些由系统按规则算出，始终可用。
+        </p>
+      </div>
+
+      <!-- ============ 结果 ============ -->
+      <div v-if="showResult" class="ai__body">
+        <p v-if="ai.analysis?.summary" class="ai__summary">
+          {{ ai.analysis.summary }}
+        </p>
+
+        <div v-if="points.length" class="ai__points">
+          <FindingCard v-for="(p, i) in points" :key="i" :finding="p" />
+        </div>
+
+        <!-- 被闸门丢掉的条数要如实说。静默丢弃等于悄悄换了一份数据给用户看 -->
+        <p v-if="ai.dropped > 0" class="ai__hint">
+          <Info class="ai__hint-icon" aria-hidden="true" />
+          另有 {{ ai.dropped }} 条未通过数值与措辞校验，已省略。
+        </p>
+
+        <p v-if="ai.analysis?.caveat" class="ai__caveat">{{ ai.analysis.caveat }}</p>
+
+        <div class="ai__foot">
+          <p class="ai__source">
+            以上由 AI 依据系统已算出的指标生成，<strong>不是</strong>系统的评估结论
+            —— 它未经临床核验，请以规则结论与治疗师意见为准。
+          </p>
+          <!-- 演示数据要**双重**标注：数据本身是模拟的，解读又是模型生成的 -->
+          <p v-if="context?.demo" class="ai__demo">
+            本次分析所用的数据为演示数据。
+          </p>
+          <el-button size="small" text @click="run">重新生成</el-button>
+        </div>
+      </div>
+    </template>
+  </section>
+</template>
+
+<style scoped>
+.ai {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 18px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  /* 比规则结论的面板淡一档 —— 视觉上它就不是主角 */
+  background: var(--surface-sunken);
+}
+
+.ai__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ai__toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+}
+
+.ai__icon {
+  width: 15px;
+  height: 15px;
+  color: var(--brand-700);
+}
+
+.ai__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-800);
+}
+
+.ai__tag {
+  padding: 1px 6px;
+  border-radius: var(--r-full);
+  background: var(--brand-50);
+  border: 1px solid var(--brand-200);
+  font-size: var(--fs-micro);
+  color: var(--brand-700);
+}
+
+.ai__chev {
+  font-size: 12px;
+  color: var(--ink-300);
+}
+
+.ai__window {
+  font-size: 12px;
+  color: var(--ink-300);
+}
+
+.ai__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.ai__hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-300);
+}
+
+.ai__hint-icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.ai__btn-icon {
+  width: 13px;
+  height: 13px;
+  margin-right: 4px;
+}
+
+.ai__error {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.ai__error-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--danger);
+}
+
+.ai__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai__summary {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: var(--lh-base);
+  color: var(--ink-700);
+}
+
+.ai__points {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai__caveat {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-400);
+}
+
+.ai__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.ai__source {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ink-300);
+}
+
+.ai__demo {
+  margin: 0;
+  font-size: 11px;
+  color: var(--warn);
+}
+
+.ai__upsell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai__upsell-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--ink-400);
+}
+
+.ai__upsell-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-500);
+}
+
+/* ============================================================================
+   打印：整块不进报告
+   ============================================================================
+   ⚠️ 这条规则**必须**留在这个组件的 scoped style 里。分析页的 .no-print
+      在父组件的 scoped CSS 里，编译成 .no-print[data-v-父]，对这里的元素
+      不匹配 —— 靠 class 透传能侥幸生效，但一改根节点就静默失效。
+      理由见文件头。 */
+@media print {
+  .ai {
+    display: none !important;
+  }
+}
+</style>

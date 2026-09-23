@@ -11,6 +11,7 @@ import { generateSession } from '../src/lib/assessment.ts'
 import type { SessionResult } from '../src/lib/assessment.ts'
 import { buildFindings, topFindings } from '../src/lib/findings.ts'
 import type { Finding } from '../src/lib/findings.ts'
+import { BANNED_TERMS } from '../src/lib/compliance.ts'
 import { TEMP_ALERT_THRESHOLD } from '../src/lib/simulator.ts'
 import type { RehabSession } from '../src/types/index.ts'
 
@@ -70,9 +71,15 @@ console.log('\n--- 合规：措辞不能越界成诊断 ---')
     ...buildFindings({ ...generateSession('靠墙静蹲', 4) }),
   ]
 
-  // 疾病名 / 诊断动作 / 治疗方案，都不许出现
-  const BANNED = ['诊断', '症', '炎', '病变', '处方', '服药', '用药', '手术治疗']
-  const hit = all.filter((f) => BANNED.some((w) => f.label.includes(w) || f.action.includes(w)))
+  // 疾病名 / 诊断动作 / 治疗方案，都不许出现。
+  //
+  // ⚠️ 这张表**从这里搬到了 src/lib/compliance.ts** —— 因为 AI 生成的那段
+  //    文本也要过同一张表（见 src/lib/aiReply.ts 的合规闸门）。留两份的话
+  //    必然各自漂移：哪天有人往这边加一个词，AI 那边不会跟着变，而两边
+  //    拦的本来是同一件事。所以只留一处，两个执行点都 import 它。
+  const hit = all.filter((f) =>
+    BANNED_TERMS.some((w) => f.label.includes(w) || f.action.includes(w)),
+  )
   check(
     `没有任何结论使用疾病名或诊断措辞（${all.length} 条过筛）`,
     hit.length === 0,

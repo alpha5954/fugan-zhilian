@@ -19,15 +19,34 @@ import {
   TECH_HIGHLIGHTS,
 } from '@/constants/project'
 
-/** 各功能模块的数据来源，如实标注 */
+/**
+ * 各功能模块的数据来源，如实标注。
+ *
+ * ⚠️ 状态文字**由每一行自己给**（`status`），不再由 `real` 推导。
+ *
+ *    原先状态是 `m.real ? '已对接后端' : '模拟数据'` 两个值推出来的，而
+ *    下面两行两个都不是：评估结论文本是**规则算出来的**，AI 分析文本是
+ *    **模型生成的**。硬套两值模板会把它们都标成「模拟数据」—— 那是不实。
+ *
+ *    `real` 留着只管标签颜色（绿=有真实后端支撑，橙=需要额外声明）。
+ *    这一页是给评审看数据来源的，宁可多一列也不要说错。
+ */
 const MODULE_STATUS = [
-  { module: '账号注册与登录', source: 'Supabase Auth', real: true },
-  { module: '设备绑定 / 解绑 / 固件状态', source: 'Supabase 数据库', real: true },
-  { module: '训练记录保存（含波形）', source: 'Supabase 数据库', real: true },
-  { module: '历史数据趋势与统计', source: 'Supabase 数据库', real: true },
-  { module: '实时信号（应变 / 温度 / sEMG）', source: '内置模拟器', real: false },
-  { module: '关节角度与动作识别', source: '内置模拟器', real: false },
-  { module: '评估结论文本', source: '规则生成，非大模型', real: false },
+  { module: '账号注册与登录', source: 'Supabase Auth', real: true, status: '已对接后端' },
+  { module: '设备绑定 / 解绑 / 固件状态', source: 'Supabase 数据库', real: true, status: '已对接后端' },
+  { module: '训练记录保存（含波形）', source: 'Supabase 数据库', real: true, status: '已对接后端' },
+  { module: '历史数据趋势与统计', source: 'Supabase 数据库', real: true, status: '已对接后端' },
+  { module: '实时信号（应变 / 温度 / sEMG）', source: '内置模拟器', real: false, status: '模拟数据' },
+  { module: '关节角度与动作识别', source: '内置模拟器', real: false, status: '模拟数据' },
+  // 这两行是本系统输出的两类文本，来源**不同**，必须分开写：
+  // 规则结论是算出来的、可逐条核对；AI 解读是模型生成的、有独立的校验闸门
+  { module: '评估结论（免费）', source: '规则计算，可逐条核对', real: false, status: '规则生成' },
+  {
+    module: 'AI 深度分析（可选）',
+    source: 'DeepSeek 大模型生成，经数值与措辞校验',
+    real: false,
+    status: 'AI 生成',
+  },
 ] as const
 </script>
 
@@ -149,7 +168,7 @@ const MODULE_STATUS = [
                 :type="m.real ? 'success' : 'warning'"
                 effect="plain"
               >
-                {{ m.real ? '已对接后端' : '模拟数据' }}
+                {{ m.status }}
               </el-tag>
             </td>
           </tr>

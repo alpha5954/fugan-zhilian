@@ -11,8 +11,10 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AiPanel: typeof import('./components/AiPanel.vue')['default']
     AuthShell: typeof import('./components/AuthShell.vue')['default']
     BarChart: typeof import('./components/BarChart.vue')['default']
+    DemoNotice: typeof import('./components/DemoNotice.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElBadge: typeof import('element-plus/es')['ElBadge']
     ElButton: typeof import('element-plus/es')['ElButton']
@@ -38,6 +40,7 @@ declare module 'vue' {
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
     ElTag: typeof import('element-plus/es')['ElTag']
     ErrorBoundary: typeof import('./components/ErrorBoundary.vue')['default']
+    FindingCard: typeof import('./components/FindingCard.vue')['default']
     MobileTabBar: typeof import('./components/MobileTabBar.vue')['default']
     PagePlaceholder: typeof import('./components/PagePlaceholder.vue')['default']
     PhaseChart: typeof import('./components/PhaseChart.vue')['default']

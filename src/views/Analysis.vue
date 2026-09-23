@@ -7,6 +7,7 @@
 // ============================================================================
 import { computed, onMounted, ref, watch } from 'vue'
 
+import AiPanel from '@/components/AiPanel.vue'
 import BarChart from '@/components/BarChart.vue'
 import type { BarSeries } from '@/components/BarChart.vue'
 import { Info } from 'lucide-vue-next'
@@ -26,11 +27,13 @@ import {
   compareExercises,
   summarize,
 } from '@/lib/analysis'
+import { buildTrendContext } from '@/lib/aiContext'
 import { REHAB_EXERCISES } from '@/lib/assessment'
 import { seriesColor } from '@/lib/chartTheme'
 import { demoSessions } from '@/lib/demoData'
 import { formatDateTime } from '@/lib/format'
 import { TOP_FINDINGS } from '@/lib/scoreConfig'
+import { useAiStore } from '@/stores/ai'
 import { useCareStore } from '@/stores/care'
 import { useSessionStore } from '@/stores/session'
 import { token } from '@/lib/theme'
@@ -38,6 +41,7 @@ import { DIRECTION_LABEL, buildTrendReport } from '@/lib/trend'
 
 const sessions = useSessionStore()
 const care = useCareStore()
+const ai = useAiStore()
 
 // ---------------------------------------------------------------------------
 // 筛选
@@ -94,7 +98,13 @@ async function load() {
 
 // 切换查看对象后重新拉取。监听 viewingPatientId 而非 activePatientId ——
 // 后者在登录完成时也会变，会和 onMounted 的首次加载重复
-watch(() => care.viewingPatientId, load)
+//
+// 顺手清掉 AI 的结果：换了个人，上一份分析说的是**别人的数据**，
+// 留着比没有更糟
+watch(() => care.viewingPatientId, () => {
+  ai.reset()
+  void load()
+})
 
 function onFilterChange() {
   void load()
@@ -164,6 +174,31 @@ const trend = computed(() => buildTrendByExercise(filtered.value))
 // 都给不出的。所以 trend.ts 刻意不算分数、不评价单次，避免成为第三次复读。
 const trendReport = computed(() =>
   buildTrendReport(filtered.value, { days: rangeDays.value }),
+)
+
+/**
+ * 交给 AI 的那份事实。
+ *
+ * ⚠️ 窗口**跟着页面走**，不另设一个固定窗口。
+ *
+ * 方案里原定「AI 用固定 30 天，与图表筛选器解耦」，实施时改了，原因很实际：
+ * 这一页的记录是 `sessions.fetch({ from })` 带回来的，**内存里就只有当前
+ * 窗口那一段**。用户选了「近 7 天」时，30 天的数据根本不在这里 —— 要凑出来
+ * 就得把 fetch 放宽再在前端重新筛，那会动到四张图取数的主干，为了一句
+ * AI 解读不值得。
+ *
+ * 跟着页面走反而更诚实：面板讲的就是**你正在看的这一段**，窗口说法也从
+ * windowLabel 直接拿，不可能和上面那几行结论说的窗口对不上。代价是切窗口
+ * 要重新分析 —— 那是应该的，换了窗口本来就是另一段数据。
+ *
+ * （结果与当前上下文不匹配时面板会退回"未分析"态，见 AiPanel 的 showResult）
+ */
+const aiContext = computed(() =>
+  buildTrendContext(trendReport.value, {
+    window: trendReport.value.windowLabel,
+    demo: usingDemo.value,
+    summary: summary.value,
+  }),
 )
 
 /** 结论条目也限流 —— 一次列五条并列的，用户会全部略过 */
@@ -418,6 +453,20 @@ onMounted(load)
           </template>
         </div>
       </section>
+
+      <!-- ================= AI 深度分析 =================
+           放在规则结论**之后**、概要和图表之前。
+
+           ⚠️ 是 `panel--conclusion` 的**兄弟节点**，不是它的子节点。
+              那个 panel 的标题写死着「依据训练记录自动生成」（见上面
+              panel__unit）—— 把 AI 內容塞进去会让那句话变成假的。
+              这一页导出的 PDF 是要递给临床医生的，"数据来源"写错属于
+              最不该出的错（README「数据来源」那一节讲的就是这件事）。
+
+           ⚠️ 也不放进 panel--conclusion 里面还有个视觉理由：规则结论是
+              可逐条核对的基础判断，AI 是它之上的综合解读。两者并列，
+              但不能长得一样 -->
+      <AiPanel :context="aiContext" />
 
       <!-- 概要 -->
       <section class="summary">

@@ -98,8 +98,25 @@ export type FindingKey =
   | 'trend_up'
   | 'trend_flat_all'
 
-export interface Finding {
-  key: FindingKey
+/**
+ * 一条结论的**内容**部分 —— 与它是不是规则产出的无关。
+ *
+ * 【为什么要把它单独拆出来】
+ * 界面上渲染一条结论用的是 FindingCard，而那个组件只需要 label / band /
+ * evidence / action 四样东西。AI 生成的那几条（见 lib/aiReply.ts 的
+ * AiPoint）形状与这四样完全一致，但不该被塞进 `FindingKey` ——
+ * 上面写过，那个联合类型是**全套结论层的公共词汇表**，往里加 AI 的键是
+ * 类别错误（AI 的结论是开放的，不是有限的几个）。
+ *
+ * 所以把"内容"抽成这个结构化类型，FindingCard 只依赖它。于是 AI 的结论
+ * 能用**同一套视觉语言**渲染，不必新做一个看起来像外来控件的卡片 ——
+ * 而"同一个东西在不同地方长得不一样"正是这个组件头部注释在防的那种漂移。
+ *
+ * ⚠️ 界面上一眼要能看出哪句是系统算的、哪句是模型说的。共用组件是对的，
+ *    但**来源标签必须分开**（见 AiPanel.vue），字段名也刻意不同：
+ *    这里是 evidence（我们算的），AI 那边是 basis（它声称的依据）。
+ */
+export interface FindingLike {
   /** 结论。白话，主语是"数据/训练"而不是"患者" */
   label: string
   /** 严重程度。与全局同一套红黄绿，不另立分级 */
@@ -108,6 +125,10 @@ export interface Finding {
   evidence: string
   /** 该做什么 */
   action: string
+}
+
+export interface Finding extends FindingLike {
+  key: FindingKey
   /** 同级别内的排序，越小越先看 */
   priority: number
 }

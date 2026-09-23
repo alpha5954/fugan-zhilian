@@ -18,9 +18,13 @@
 // 「结论要简单，依据要完整」—— 与评分、与 findings 的注释是同一条原则。
 // ============================================================================
 import RiskBadge from './RiskBadge.vue'
-import type { Finding } from '@/lib/findings'
+import type { FindingLike } from '@/lib/findings'
 
-defineProps<{ finding: Finding }>()
+// 收的是 FindingLike（label/band/evidence/action），不是完整的 Finding。
+// 于是 AI 生成的那几条（lib/aiReply.ts 的 AiPoint）也能用这个组件渲染，
+// 不必新做一个"看起来像外来控件"的卡片 —— 理由见 lib/findings.ts 里
+// FindingLike 的注释。规则层的 Finding 是它的子类型，照传不误。
+defineProps<{ finding: FindingLike }>()
 </script>
 
 <template>

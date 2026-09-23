@@ -32,9 +32,11 @@ import {
   TriangleAlert,
 } from 'lucide-vue-next'
 
+import AiPanel from '@/components/AiPanel.vue'
 import DemoNotice from '@/components/DemoNotice.vue'
 import RiskBadge from '@/components/RiskBadge.vue'
 import StateBlock from '@/components/StateBlock.vue'
+import { buildInsightContext } from '@/lib/aiContext'
 import { buildDemoAlerts, buildDemoSessions } from '@/lib/demoData'
 import { useCountUp } from '@/composables/useCountUp'
 import {
@@ -44,6 +46,7 @@ import {
   type SummaryIcon,
 } from '@/lib/insight'
 import { SCORE_DISCLAIMER } from '@/lib/scoreConfig'
+import { useAiStore } from '@/stores/ai'
 import { useAlertStore } from '@/stores/alert'
 import { useCareStore } from '@/stores/care'
 import { useDeviceStore } from '@/stores/device'
@@ -55,6 +58,7 @@ const sessions = useSessionStore()
 const alerts = useAlertStore()
 const devices = useDeviceStore()
 const care = useCareStore()
+const ai = useAiStore()
 
 const loading = ref(true)
 /** 「查看详细数据」是否展开。默认折叠 —— 家属要的结论在上面已经有了 */
@@ -159,6 +163,24 @@ const insight = computed(() =>
 )
 
 /**
+ * 交给 AI 的那份事实。
+ *
+ * ⚠️ 取的是 `insight` —— **页面正在显示的那一份**，演示态就是演示态。
+ *    另算一份 realInsight 的话，AI 会对着和上面卡片不一样的数字讲话。
+ *
+ * 窗口写「本周」：insight 的窗口是 WINDOW_DAYS（7 天，含今天）。
+ * ⚠️ 这和数据分析页的「近 7 天」**不是同一个窗口** —— 那一页是从 N 天前
+ *    的零点起算的自然日区间。两页结论不一致是合理的，但说法要区分开，
+ *    所以这里不写「近 7 天」。
+ */
+const aiContext = computed(() =>
+  buildInsightContext(insight.value, {
+    window: '本周',
+    demo: usingDemo.value,
+  }),
+)
+
+/**
  * 评分滚动的展示值。
  *
  * 只在**值发生变化**时滚 —— 首次加载直接落位。
@@ -185,7 +207,13 @@ async function reload() {
 // 切换查看对象后要重新拉数据。
 // 监听 viewingPatientId（用户主动切换）而不是 activePatientId ——
 // 后者在登录完成时也会变，会让首次加载多发一轮请求。
-watch(() => care.viewingPatientId, reload)
+//
+// 顺手清掉 AI 的结果：换了个人，上一份分析说的是**别人的数据**，
+// 留着比没有更糟
+watch(() => care.viewingPatientId, () => {
+  ai.reset()
+  void reload()
+})
 
 onMounted(reload)
 </script>
@@ -316,6 +344,21 @@ onMounted(reload)
         </RouterLink>
       </article>
     </section>
+
+    <!-- ================= AI 深度分析 =================
+         放在三张家属语言卡片之后、「详细数据」折叠区**之前** ——
+         符合这一页自己的层次：先结论、后解读、再明细。
+
+         ⚠️ `:default-open="false"` 是刻意的。这一页是所有访客的落地页
+            （路由把 '' 重定向到 dashboard），默认展开的话每个路过的人
+            都会点一次，而每次都是一次计费。折叠着既保住了功能曝光
+            （标题上写着「AI 深度分析」和「AI 生成」标签），又不会被
+            误触烧掉额度。
+
+         ⚠️ 卡片那边 `v-if="!loading"`，这里不加 —— 加载中时 context 里的
+            分数是 null，面板会自己显示成"数据加载中"，不会显示一个
+            像结论的东西。 -->
+    <AiPanel :context="aiContext" :default-open="false" />
 
     <!-- ================= 折叠：详细数据 ================= -->
     <section class="detail">
