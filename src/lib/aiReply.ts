@@ -191,6 +191,18 @@ const BANDS: readonly RiskBand[] = ['green', 'yellow', 'red']
 // 追问的上下限
 // ---------------------------------------------------------------------------
 
+/**
+ * 拼依据用的分隔符。
+ *
+ * ⚠️ 为什么不能直接用「；」：**事实文本自己就含分号**（规则层的 evidence 里
+ *    那种「直腿抬高 9.3° → 11.4°；坐位伸膝 60.4° → 72.9°」），拼起来分不清
+ *    哪里是一条事实的结尾。
+ *
+ * 导出是给界面用的 —— 它按这个分隔符把依据拆成逐条列表。**两边必须用同一个
+ * 常量**，否则界面会拆不开，而那种错只是"看起来还是挤成一团"，不会报错。
+ */
+export const BASIS_SEPARATOR = ' ｜ '
+
 /** 问题长度上限。**这个是给输入框用的**，界面要按它做 maxlength */
 export const MAX_QUESTION_CHARS = 200
 
@@ -491,8 +503,8 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
     //
     // ⚠️ 分隔符不能用「；」—— 事实文本自己就含分号（规则层的 evidence 里
     //    那种「直腿抬高 9.3° → 11.4°；坐位伸膝 60.4° → 72.9°」），
-    //    拼起来分不清哪里是一条事实的结尾。用全角竖线当中缝。
-    const basis = cited.map((f) => f.text).join(' ｜ ')
+    //    拼起来分不清哪里是一条事实的结尾。用 BASIS_SEPARATOR 当中缝。
+    const basis = cited.map((f) => f.text).join(BASIS_SEPARATOR)
 
     // ★ 数值闸门收紧到「你引用的那几条事实里」。理由见 allowedNumbersForFacts
     const scoped = allowedNumbersForFacts(ctx, cited.map((f) => f.id))
@@ -660,7 +672,7 @@ export function parseAiAsk(
       answer: rawAnswer,
       decline: '',
       cites: cited.map((f) => f.id),
-      basis: cited.map((f) => f.text).join(' ｜ '),
+      basis: cited.map((f) => f.text).join(BASIS_SEPARATOR),
       caveat,
     },
     reason: null,

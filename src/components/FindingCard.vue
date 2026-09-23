@@ -17,14 +17,38 @@
 //
 // 「结论要简单，依据要完整」—— 与评分、与 findings 的注释是同一条原则。
 // ============================================================================
+import { computed } from 'vue'
+
 import RiskBadge from './RiskBadge.vue'
+import { BASIS_SEPARATOR } from '@/lib/aiReply'
 import type { FindingLike } from '@/lib/findings'
 
 // 收的是 FindingLike（label/band/evidence/action），不是完整的 Finding。
 // 于是 AI 生成的那几条（lib/aiReply.ts 的 AiPoint）也能用这个组件渲染，
 // 不必新做一个"看起来像外来控件"的卡片 —— 理由见 lib/findings.ts 里
 // FindingLike 的注释。规则层的 Finding 是它的子类型，照传不误。
-defineProps<{ finding: FindingLike }>()
+const props = defineProps<{ finding: FindingLike }>()
+
+/**
+ * 依据拆成逐条。
+ *
+ * ============================================================================
+ * 【为什么要拆】
+ * ============================================================================
+ * AI 那条路径的 evidence 是**由若干条事实拼出来的**（模型只报编号，
+ * 原文由 lib/aiReply.ts 用 BASIS_SEPARATOR 拼），一条结论可能带四条依据。
+ * 拼成一整行是一坨灰字，实测读不下去 —— 用户的原话是"太死板了"。
+ *
+ * 拆成一行一条之后，同样是那些内容，但能读了。
+ *
+ * ⚠️ 规则层的 evidence **不含这个分隔符**，所以走下面那一支、照旧单行显示。
+ *    实测规则层全部文案零命中。
+ */
+const evidenceParts = computed(() => {
+  const { evidence } = props.finding
+  if (!evidence.includes(BASIS_SEPARATOR)) return []
+  return evidence.split(BASIS_SEPARATOR).filter(Boolean)
+})
 </script>
 
 <template>
@@ -33,7 +57,11 @@ defineProps<{ finding: FindingLike }>()
       <RiskBadge :band="finding.band" dot size="sm" />
       <span>{{ finding.label }}</span>
     </p>
-    <p class="finding__evidence">{{ finding.evidence }}</p>
+    <!-- 单条依据照旧一行；多条（AI 拼出来的）拆成列表 -->
+    <p v-if="!evidenceParts.length" class="finding__evidence">{{ finding.evidence }}</p>
+    <ul v-else class="finding__basis">
+      <li v-for="(part, i) in evidenceParts" :key="i">{{ part }}</li>
+    </ul>
     <p class="finding__action">{{ finding.action }}</p>
   </article>
 </template>
@@ -80,6 +108,29 @@ defineProps<{ finding: FindingLike }>()
   font-size: var(--fs-xs);
   line-height: var(--lh-base);
   color: var(--ink-400);
+}
+
+/* 多条依据：一行一条。小圆点而不是默认的圆点符号 —— 默认的太大，
+   在一行小字里像着重号 */
+.finding__basis {
+  margin: 3px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-base);
+  color: var(--ink-400);
+}
+
+.finding__basis li {
+  position: relative;
+  padding-left: 10px;
+}
+
+.finding__basis li::before {
+  content: '·';
+  position: absolute;
+  left: 0;
+  color: var(--ink-300);
 }
 
 .finding__action {

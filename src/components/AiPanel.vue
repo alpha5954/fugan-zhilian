@@ -39,7 +39,7 @@ import { Info, Lock, RefreshCw, Sparkles } from 'lucide-vue-next'
 import FindingCard from './FindingCard.vue'
 import { useAiStore } from '@/stores/ai'
 import type { AiContext } from '@/lib/aiContext'
-import { MAX_QUESTION_CHARS } from '@/lib/aiReply'
+import { BASIS_SEPARATOR, MAX_QUESTION_CHARS } from '@/lib/aiReply'
 import type { FindingLike } from '@/lib/findings'
 
 const props = withDefaults(
@@ -169,6 +169,14 @@ const canAsk = computed(
     draft.value.trim().length > 0,
 )
 
+/**
+ * 依据拆成逐条。理由同 FindingCard —— 拼成一整行读不下去。
+ * 分隔符用的是 aiReply 里那个常量，两边不会漂。
+ */
+function basisParts(basis: string): string[] {
+  return basis ? basis.split(BASIS_SEPARATOR).filter(Boolean) : []
+}
+
 async function send(): Promise<void> {
   if (!props.context || !canAsk.value) return
 
@@ -290,7 +298,12 @@ async function send(): Promise<void> {
               {{ t.decline }}
             </p>
 
-            <p v-if="t.basis" class="asklist__basis">依据：{{ t.basis }}</p>
+            <div v-if="t.basis" class="asklist__basis">
+              <span class="asklist__basis-label">依据</span>
+              <ul class="asklist__basis-list">
+                <li v-for="(line, j) in basisParts(t.basis)" :key="j">{{ line }}</li>
+              </ul>
+            </div>
           </li>
         </ul>
 
@@ -561,10 +574,35 @@ async function send(): Promise<void> {
 }
 
 .asklist__basis {
-  margin: 1px 0 0;
+  display: flex;
+  gap: 6px;
+  margin: 3px 0 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-base);
   color: var(--ink-400);
+}
+
+.asklist__basis-label {
+  flex-shrink: 0;
+  color: var(--ink-300);
+}
+
+.asklist__basis-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.asklist__basis-list li {
+  position: relative;
+  padding-left: 10px;
+}
+
+.asklist__basis-list li::before {
+  content: '·';
+  position: absolute;
+  left: 0;
+  color: var(--ink-300);
 }
 
 .askbar {
