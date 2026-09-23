@@ -49,24 +49,22 @@
 // ============================================================================
 
 /**
- * 任何位置都不许出现的词。
+ * 诊断动作 + 疾病 / 病理名称。
  *
- * 分三类，与上面那段边界一一对应：
- *   诊断动作 / 疾病病理名称 / 治疗方案
- *
- * ⚠️ 改这张表要连带跑 `npm run check:findings` —— 规则层的文案也要过这
- *    张表，放宽或收紧都可能让那边红。两边是同一根线。
+ * ⚠️ **这一类在哪儿都不许出现，包括拒答里。**
+ *    「不能判断是不是关节炎」这种句子要拦 —— 它把病名摆到家属面前了，
+ *    哪怕是以否定的形式。
  *
  * 「症 / 炎」这类单字是**故意放宽匹配**的：「膝关节僵硬症」「关节炎」
- * 「肌腱炎」都靠它们拦下。代价是可能误伤「症状」以外的正常用词 —— 实测
- * 规则层现有的全部文案（23 条）零误伤，所以这个代价目前不成立。
+ * 「肌腱炎」都靠它们拦下。代价是可能误伤正常用词 —— 实测规则层现有的
+ * 全部文案（23 条）零误伤，所以这个代价目前不成立。
  */
-export const BANNED_TERMS: readonly string[] = [
-  // —— 诊断动作 ——
+const DISEASE_TERMS: readonly string[] = [
+  // 诊断动作
   '诊断',
   '确诊',
   '疑似',
-  // —— 疾病 / 病理名称 ——
+  // 疾病 / 病理名称
   '症',
   '炎',
   '病变',
@@ -77,7 +75,29 @@ export const BANNED_TERMS: readonly string[] = [
   '损伤',
   '退变',
   '坏死',
-  // —— 治疗方案 ——
+] as const
+
+/**
+ * 治疗方案的**类别词**。
+ *
+ * ⚠️ **这一类只在"回答"里禁，在"拒答"里放行。**
+ *
+ * 这个区分是 2026-09-24 打真实调用才发现的，而且当时**误杀的是一次正确
+ * 行为**：模型面对提示词注入时正确地拒答了，写的是
+ *
+ *   「用药问题需要由医生判断，这份训练数据里没有相关内容。」
+ *
+ * 而禁词表把「用药」当治疗方案拦了下来 —— 于是这条拒答被丢掉，界面上
+ * 表现成"AI 出错了"。
+ *
+ * 区别在于：「用药」是个**类别**，「关节炎」是个**具体病名**。
+ *   · 在拒答里说「用药问题需要医生判断」—— 无害，它就是在拒绝给方案
+ *   · 在拒答里说「不能判断是不是关节炎」—— 有害，具体病名被说出来了
+ *
+ * 所以拒答这一侧放宽到只禁病名。拒答本身就是安全动作，
+ * **把一次正确的拒答丢掉，比放过一句含类别词的拒答糟得多**。
+ */
+const TREATMENT_TERMS: readonly string[] = [
   '处方',
   '服药',
   '服用',
@@ -89,6 +109,19 @@ export const BANNED_TERMS: readonly string[] = [
   '手术',
   '注射',
   '针灸',
+] as const
+
+/**
+ * 全部禁用词（两类合起来）。
+ *
+ * 评估结论文本那一侧（scripts/check-findings.ts）用的是这一份 ——
+ * 那里的文案是我们自己手写的短句，不存在"拒答"这个场合，所以不区分。
+ *
+ * ⚠️ 改这张表要连带跑 `npm run check:findings`。
+ */
+export const BANNED_TERMS: readonly string[] = [
+  ...DISEASE_TERMS,
+  ...TREATMENT_TERMS,
 ] as const
 
 /**
@@ -109,6 +142,17 @@ const SENTENCE_SPLIT = /[。！？；!?;\n]+/
 /** 句首取几个字用来判断主语。「该患者」剥掉「该」之后还剩两字，取 3 足够 */
 const HEAD_LEN = 3
 
+export interface ComplianceOptions {
+  /**
+   * 这段文字是**拒答**。
+   *
+   * 放宽治疗方案的类别词（`TREATMENT_TERMS`），但仍然禁病名。
+   * 理由见 `TREATMENT_TERMS` 那段 —— 简单说：
+   * **拒答本身是安全动作，把一次正确的拒答丢掉比放过一句含类别词的拒答糟。**
+   */
+  inDecline?: boolean
+}
+
 /**
  * 检查一段文本有没有越过合规线。
  *
@@ -118,10 +162,17 @@ const HEAD_LEN = 3
  * 调用方需要区分「因为病名被拒」和「因为数值对不上被拒」—— 排查时两者
  * 的修法完全不同。返回 `false` 的话，出了问题只能靠猜。
  */
-export function complianceIssue(text: string): string | null {
+export function complianceIssue(
+  text: string,
+  opts: ComplianceOptions = {},
+): string | null {
   if (!text) return null
 
-  for (const word of BANNED_TERMS) {
+  const words = opts.inDecline
+    ? DISEASE_TERMS
+    : [...DISEASE_TERMS, ...TREATMENT_TERMS]
+
+  for (const word of words) {
     if (text.includes(word)) return `出现禁用词「${word}」`
   }
 

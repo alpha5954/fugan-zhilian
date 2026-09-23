@@ -604,10 +604,15 @@ export function parseAiAsk(
   if (decline) {
     if (decline.length > MAX_DECLINE_CHARS) return fail('拒答说明过长')
 
-    // ⚠️ 拒答说明**照样过合规闸门**。
-    //    「不能判断是不是关节炎」这种句子恰恰是要拦的 —— 它把一个病名
-    //    摆到了家属面前，哪怕是以否定的形式
-    const why = complianceIssue(decline)
+    // ⚠️ 拒答说明**照样过合规闸门**，但用 `inDecline` 那一档：
+    //    禁病名，**放行治疗方案的类别词**。
+    //
+    //    这个区分是打真实接口试出来的 —— 模型正确拒答时写的是
+    //    「用药问题需要由医生判断」，而一刀切的禁词表把「用药」拦下来，
+    //    于是**一次正确的拒答被丢掉**，界面上表现成"AI 出错了"。
+    //    拒答本身是安全动作，丢掉它比放过一个类别词糟得多。
+    //    但「不能判断是不是关节炎」仍然要拦 —— 那是具体病名。
+    const why = complianceIssue(decline, { inDecline: true })
     if (why) return fail(`拒答说明本身越界：${why}`)
 
     return {
@@ -634,10 +639,14 @@ export function parseAiAsk(
     return fail(`引用了不存在的事实：${cites.join(',')}`)
   }
 
-  // 数值闸门同样收紧到「你引用的那几条」。追问这条路径和结论那条一样严
+  // 数值闸门同样收紧到「你引用的那几条」。追问这条路径和结论那条一样严。
+  //
+  // ⚠️ 失败原因里要**带上它引用的是哪几条** —— 不带的话只知道"某个数字
+  //    不对"，不知道是"数字编的"还是"引用漏了一条"。这两种的修法完全相反：
+  //    前者要改提示词，后者要补引用。结论那条路径也是这么做的。
   const scoped = allowedNumbersForFacts(ctx, cited.map((f) => f.id))
   const why = checkText(rawAnswer, scoped, MAX_ANSWER_CHARS, true)
-  if (why) return fail(`回答${why}`)
+  if (why) return fail(`回答${why}（引用了 ${cites.join(',')}）`)
 
   let caveat = ''
   {

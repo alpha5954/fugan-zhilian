@@ -925,6 +925,53 @@ console.log('='.repeat(70))
     )
   }
 
+  // ---- ③b ★ 拒答里的**类别词**要放行 ----
+  //
+  // 这一条是打真实调用才发现的：模型面对提示词注入时**正确拒答了**，
+  // 写的是「用药问题需要由医生判断」，而一刀切的禁词表把「用药」拦下来，
+  // 于是那次正确的拒答被丢掉，界面上表现成"AI 出错了"。
+  //
+  // 区别在于「用药」是**类别**、「关节炎」是**具体病名**。
+  {
+    const raw = JSON.stringify({
+      answer: '',
+      cites: [],
+      decline: '用药问题需要由医生判断，这份训练数据里没有相关内容。',
+      caveat: '',
+    })
+    const r = parseAiAsk(raw, ctx, '该吃什么药')
+    check(
+      '★ 拒答里出现「用药」这样的类别词 → 放行',
+      r.answer !== null && r.answer.decline.length > 0,
+      r.reason ?? '',
+    )
+  }
+  {
+    const raw = JSON.stringify({
+      answer: '',
+      cites: [],
+      decline: '手术与否需要由医生评估。',
+      caveat: '',
+    })
+    check(
+      '拒答里出现「手术」也放行（同一档）',
+      parseAiAsk(raw, ctx, '要不要手术').answer !== null,
+    )
+  }
+  {
+    // 反方向：**回答**里出现类别词仍然要拦 —— 那是真的在给方案
+    const raw = JSON.stringify({
+      answer: '建议先用药观察。',
+      cites: [fact0.id],
+      decline: '',
+      caveat: '',
+    })
+    check(
+      '回答里出现「用药」→ 仍然被拒',
+      parseAiAsk(raw, ctx, '怎么办').answer === null,
+    )
+  }
+
   // ---- ④ 形状 ----
   const shapeCases: [string, string][] = [
     ['两个字段都空', JSON.stringify({ answer: '', cites: [], decline: '', caveat: '' })],
