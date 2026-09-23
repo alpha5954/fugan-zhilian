@@ -337,8 +337,10 @@ export function buildInsightContext(
   if (score !== null) derived.本周恢复评分 = score
   if (insight.rawScore !== null) derived.调整前评分 = insight.rawScore
   if (insight.adjustments.length) {
-    derived.评分共调整 =
-      round(insight.adjustments.reduce((a, x) => a + x.delta, 0))
+    // 同样存**幅度**不存带符号的值 —— 理由见上面事实文本那段。
+    // 评分调整只会往下走（安全扣分），所以这里恒为下调
+    derived.评分下调幅度 =
+      Math.abs(round(insight.adjustments.reduce((a, x) => a + x.delta, 0)))
   }
   for (const p of insight.parts) {
     if (p.weakest) {
@@ -357,8 +359,18 @@ export function buildInsightContext(
     book.add(`本周恢复评分 ${score} 分，档位「${insight.level.label}」`)
   }
   for (const adj of insight.adjustments) {
-    const sign = adj.delta > 0 ? '+' : ''
-    book.add(`${adj.text}，影响 ${sign}${adj.delta} 分`)
+    // ⚠️ 写**幅度 + 方向词**，不写带符号的数。
+    //
+    //    原来写的是「影响 -20 分」，而模型自然会写「评分下调 20 分」——
+    //    20 ≠ -20，数值闸门把它当幻觉拒掉。实测踩过：摘要和一条结论
+    //    都因此被丢。
+    //
+    //    中文里方向是靠词表达的（上调/下调），数字只承担幅度。事实文本
+    //    按人话写，模型抄的就是人话。
+    //
+    //    `adj.text` 本身已经以「评分已下调」结尾，所以这里只补幅度 ——
+    //    补成「评分已下调，评分下调 20 分」就重复了
+    book.add(`${adj.text} ${Math.abs(adj.delta)} 分`)
   }
   for (const p of insight.parts) {
     book.add(`${p.label}得分 ${Math.round(p.value * 100)}%。${p.detail}`)

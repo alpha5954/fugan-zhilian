@@ -137,6 +137,9 @@ console.log('③ 过闸门')
 const r = parseAiReply(body.text, ctx)
 
 console.log(`  丢掉 ${r.dropped} 条${r.reason ? `｜整篇失败：${r.reason}` : ''}`)
+// ★ 逐条打原因。只给一个数字的话，「模型变差了」和「闸门写严了」分不出来，
+//   而这两件事的修法完全相反
+for (const why of r.droppedReasons) console.log(`    ✗ ${why}`)
 console.log()
 
 if (!r.analysis) {

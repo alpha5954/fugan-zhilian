@@ -101,6 +101,17 @@ export interface AiParseResult {
   analysis: AiAnalysis | null
   /** 被丢掉的条目数（含 summary）。界面要如实显示 */
   dropped: number
+  /**
+   * 每一条被丢掉的原因。
+   *
+   * ⚠️ **排查时全靠它。** 只给一个数字的话，「模型变差了」和「闸门写严了」
+   *    这两件事分不出来 —— 而它们的修法完全相反：前者要改提示词，后者
+   *    要改闸门。scripts/try-ai.ts 打真实调用时会把它逐条打出来。
+   *
+   * 界面**不显示**这个（家属读"引用了上下文里没有的数值 87.3"没有意义），
+   * 只显示条数。
+   */
+  droppedReasons: string[]
   /** 整篇失败时的中文原因。部分成功时为 null */
   reason: string | null
 }
@@ -122,10 +133,14 @@ const MAX_POINTS = 4
  * 一条结论最多能引用几条事实。
  *
  * 上限管两件事：界面上的「依据」那一行不能长到读不下去
- * （3 条 × 约 45 字 ≈ 135 字，和原来的上限同量级），
- * 以及提示词里那句"不超过 3 条"有个可执行的兜底。
+ * （4 条 × 约 45 字 ≈ 180 字），以及提示词里那句"不超过 4 条"有个可执行的兜底。
+ *
+ * ⚠️ 从 3 提到 4 是**实测之后**改的。原来定 3，而 demo 数据里那条
+ *    「安全事件导致评分下调」同时用到了评分、事件、下调幅度三处信息，
+ *    模型报了 3 条却漏了装 78 分的那条 → 被闸门拒。
+ *    上限太紧的代价不是"少写点"，是**整条结论作废**。
  */
-const MAX_CITES = 3
+const MAX_CITES = 4
 
 const BANDS: readonly RiskBand[] = ['green', 'yellow', 'red']
 
@@ -320,10 +335,15 @@ function asString(v: unknown): string {
  * @param ctx 发过去的上下文。数值闸门的允许集由它算出来
  */
 export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
+  const fail = (reason: string): AiParseResult => ({
+    analysis: null,
+    dropped: 0,
+    droppedReasons: [],
+    reason,
+  })
+
   const text = typeof raw === 'string' ? raw.trim() : ''
-  if (!text) {
-    return { analysis: null, dropped: 0, reason: 'AI 没有返回内容' }
-  }
+  if (!text) return fail('AI 没有返回内容')
 
   // ---- 闸门 ①：形状 ----
   let obj: unknown
@@ -332,21 +352,19 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
   } catch {
     // 截断的 JSON 也走这一支。区分"截断"和"格式错"是 Edge Function 的活
     // （它拿得到 finishReason），这里只看结果
-    return { analysis: null, dropped: 0, reason: 'AI 返回的不是合法 JSON' }
+    return fail('AI 返回的不是合法 JSON')
   }
 
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
-    return { analysis: null, dropped: 0, reason: 'AI 返回的不是一个对象' }
+    return fail('AI 返回的不是一个对象')
   }
 
   const o = obj as Record<string, unknown>
 
-  if (!Array.isArray(o.points)) {
-    return { analysis: null, dropped: 0, reason: 'AI 返回里没有 points 数组' }
-  }
+  if (!Array.isArray(o.points)) return fail('AI 返回里没有 points 数组')
 
   const allowed = allowedNumbers(ctx)
-  let dropped = 0
+  const droppedReasons: string[] = []
 
   // ---- summary：单独一条，可以单独被拒 ----
   let summary = ''
@@ -354,7 +372,7 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
     const rawSummary = asString(o.summary)
     // summary 里可以有数字（它通常就是引用了几个关键值），一样要过闸门
     const why = checkText(rawSummary, allowed, MAX_SUMMARY_CHARS, true)
-    if (why) dropped++
+    if (why) droppedReasons.push(`摘要：${why}`)
     else summary = rawSummary.trim()
   }
 
@@ -366,14 +384,16 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
     if (points.length >= MAX_POINTS) break
 
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      dropped++
+      droppedReasons.push('有一条不是一个对象')
       continue
     }
     const p = item as Record<string, unknown>
+    // 用正文开头当标签 —— 排查时"是哪一条"比"第几条"有用得多
+    const tag = asString(p.text).slice(0, 18) || '（无正文）'
 
     const band = asString(p.band)
     if (!BANDS.includes(band as RiskBand)) {
-      dropped++
+      droppedReasons.push(`「${tag}」band 非法：${band || '缺'}`)
       continue
     }
 
@@ -387,7 +407,7 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
     if (!cites.length) {
       // 一条结论必须能指到具体的事实上。指不到就不该出现 ——
       // 与规则层的 Finding 同一个要求（"展开不了依据的结论出不来"）
-      dropped++
+      droppedReasons.push(`「${tag}」没有报 cites`)
       continue
     }
 
@@ -398,7 +418,7 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
     }
     if (cited.length !== cites.length) {
       // 报了一个不存在的编号 —— 这是编造，不是疏忽。整条丢掉
-      dropped++
+      droppedReasons.push(`「${tag}」引用了不存在的事实：${cites.join(',')}`)
       continue
     }
 
@@ -416,7 +436,7 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
       checkText(action, scoped, MAX_ACTION_CHARS, true)
 
     if (why) {
-      dropped++
+      droppedReasons.push(`「${tag}」${why}（引用了 ${cites.join(',')}）`)
       continue
     }
 
@@ -429,16 +449,12 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
     })
   }
 
-  if (dropped > 0) {
-    // 被丢掉的条数必须让界面上能说出来。这里只打日志，界面读 dropped
-    console.warn(`[ai] ${dropped} 条未通过校验，已省略`)
-  }
-
   // ---- 全都没了：整篇降级 ----
   if (!points.length && !summary) {
     return {
       analysis: null,
-      dropped,
+      dropped: droppedReasons.length,
+      droppedReasons,
       reason: 'AI 这次给出的内容没有通过校验，已全部丢弃',
     }
   }
@@ -455,7 +471,8 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
 
   return {
     analysis: { summary, points, caveat },
-    dropped,
+    dropped: droppedReasons.length,
+    droppedReasons,
     reason: null,
   }
 }

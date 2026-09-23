@@ -486,8 +486,8 @@ console.log('='.repeat(70))
   })
   const r4 = parseAiReply(many, ctx)
   check(
-    '引用超过 3 条 → 截到 3 条而不是丢掉整条',
-    r4.analysis !== null && (r4.analysis.points[0]?.cites.length ?? 0) <= 3,
+    '引用超过上限 → 截到上限而不是丢掉整条',
+    r4.analysis !== null && (r4.analysis.points[0]?.cites.length ?? 0) <= 4,
     `cites=${r4.analysis?.points[0]?.cites.length}`,
   )
 }
@@ -666,12 +666,14 @@ console.log('='.repeat(70))
   const ok = (summary: string): AiParseResult => ({
     analysis: { summary, points: [], caveat: '' },
     dropped: 0,
+    droppedReasons: [],
     reason: null,
   })
   /** 全被闸门拒掉 —— 解析结果合法，但**没有内容** */
   const rejected: AiParseResult = {
     analysis: null,
     dropped: 3,
+    droppedReasons: ['摘要：引用了上下文里没有的数值 999', '没有报 cites', '没有报 cites'],
     reason: 'AI 这次给出的内容没有通过校验，已全部丢弃',
   }
 
