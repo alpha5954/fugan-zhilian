@@ -42,23 +42,28 @@ import type { AiContext } from '@/lib/aiContext'
 import { BASIS_SEPARATOR, MAX_QUESTION_CHARS } from '@/lib/aiReply'
 import type { FindingLike } from '@/lib/findings'
 
-const props = withDefaults(
-  defineProps<{
-    /** 页面正在显示的那份数据构造出来的上下文。数据还没到位时为 null */
-    context: AiContext | null
-    /**
-     * 默认展开吗。
-     *
-     * 概览页传 false —— 那是所有访客的落地页，折叠起来既保住功能曝光，
-     * 又不会让每个路过的人都点一次（点一次就是一次计费）。
-     */
-    defaultOpen?: boolean
-  }>(),
-  { defaultOpen: true },
-)
+const props = defineProps<{
+  /** 页面正在显示的那份数据构造出来的上下文。数据还没到位时为 null */
+  context: AiContext | null
+}>()
 
 const ai = useAiStore()
-const open = ref(props.defaultOpen)
+
+/**
+ * 展开状态。**默认展开**，用户点了才收起来。
+ *
+ * ⚠️ 这里原来有一个 `defaultOpen` 属性，概览页传 false（默认折叠），
+ *    理由是"避免误触计费"。**那个理由站不住**：展开只是把按钮显示出来，
+ *    分析仍然是点了才跑 —— 展开不发请求、不花钱（挂载时的 `ai.restore`
+ *    只读本地缓存）。当时把"展开"和"触发"混为一谈了。
+ *
+ *    折叠真正的代价是功能藏在一个要点的箭头后面，而**没有人会去点一个
+ *    自己不知道存在的按钮**。
+ *
+ *    属性一并删掉了 —— 两个页面都要展开，留着一个没人传的开关只会让
+ *    下一个读代码的人以为它有用途。
+ */
+const open = ref(true)
 
 // ---------------------------------------------------------------------------
 // 等待秒数
@@ -255,7 +260,9 @@ async function send(): Promise<void> {
         </p>
 
         <div v-if="points.length" class="ai__points">
-          <FindingCard v-for="(p, i) in points" :key="i" :finding="p" />
+          <!-- source="ai" → 左条画成点状，和规则结论区分开。
+               理由见 FindingCard 里 .finding--ai 那段 -->
+          <FindingCard v-for="(p, i) in points" :key="i" :finding="p" source="ai" />
         </div>
 
         <!-- 被闸门丢掉的条数要如实说。静默丢弃等于悄悄换了一份数据给用户看 -->

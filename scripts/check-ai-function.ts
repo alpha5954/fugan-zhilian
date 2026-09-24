@@ -265,6 +265,37 @@ console.log('='.repeat(70))
     '要求 summary 说「意味着什么」而不是复述数字',
     SYSTEM_PROMPT.includes('这段时间意味着什么'),
   )
+
+  // ---- ★ 加值：别复述 findings（2026-09-24 第二轮反馈）----
+  //
+  // 实测把两块的输出摆在一起：规则层三条结论，AI 三条 —— **一一对应，
+  // 只是换了措辞、调了顺序**。这一页的 AI 没提供任何规则层没说的东西。
+  // 而同一个模型的**追问**路径却能说出「量不是短板，幅度才是」这种综合判断。
+  // 差的就是这一节：分析那条从头到尾只要求它"引用事实"，没要求它综合。
+  check(
+    '★ 有一节讲「你的价值在哪」',
+    SYSTEM_PROMPT.includes('你的价值在哪'),
+    '没有的话它就只会改写规则层的结论',
+  )
+  check(
+    '★ 明确禁止复述 findings',
+    SYSTEM_PROMPT.includes('不要复述 findings / cards 里的条目'),
+  )
+  check(
+    '给了「综合」的具体样子（连起来看 / 量质短板 / 指标矛盾 / 优先级）',
+    ['把几条结论连起来看', '量和质', '指标之间的矛盾', '说清优先级'].every((k) =>
+      SYSTEM_PROMPT.includes(k),
+    ),
+  )
+  check(
+    '提醒了「综合归综合，规矩不变」',
+    SYSTEM_PROMPT.includes('该报的 cites 一条不少'),
+    '不加这句的话，鼓励综合容易被理解成"可以不报引用"',
+  )
+  check(
+    '追问那条也禁止复述 findings',
+    ASK_SYSTEM_PROMPT.includes('不要换个说法再讲一遍'),
+  )
   check(
     '要求 action 具体到能照着做',
     SYSTEM_PROMPT.includes('具体到能照着做'),

@@ -27,7 +27,23 @@ import type { FindingLike } from '@/lib/findings'
 // 于是 AI 生成的那几条（lib/aiReply.ts 的 AiPoint）也能用这个组件渲染，
 // 不必新做一个"看起来像外来控件"的卡片 —— 理由见 lib/findings.ts 里
 // FindingLike 的注释。规则层的 Finding 是它的子类型，照传不误。
-const props = defineProps<{ finding: FindingLike }>()
+/**
+ * 这条结论是谁给的。
+ *
+ * ⚠️ **显式传，不靠特征去猜。**
+ *    曾经想过用"依据里有没有分隔符"来判断是不是 AI 的 —— 那是把显示
+ *    细节当成类型标记，哪天分隔符变了就会静默失效（卡片还是画得出来，
+ *    只是不再是点状边），而且不会有任何报错。
+ *
+ *    规则层不传，默认 'rule'；只有 AiPanel 传 'ai'。
+ */
+const props = withDefaults(
+  defineProps<{
+    finding: FindingLike
+    source?: 'rule' | 'ai'
+  }>(),
+  { source: 'rule' },
+)
 
 /**
  * 依据拆成逐条。
@@ -52,7 +68,10 @@ const evidenceParts = computed(() => {
 </script>
 
 <template>
-  <article class="finding" :class="`finding--${finding.band}`">
+  <article
+    class="finding"
+    :class="[`finding--${finding.band}`, source === 'ai' && 'finding--ai']"
+  >
     <p class="finding__label">
       <RiskBadge :band="finding.band" dot size="sm" />
       <span>{{ finding.label }}</span>
@@ -91,6 +110,26 @@ const evidenceParts = computed(() => {
 .finding--green {
   border-left-color: var(--ok);
   background: var(--ok-bg);
+}
+
+/* ============================================================================
+   AI 生成的条目：左条改成**点状**
+   ============================================================================
+   两块用的都是这个组件（共用是对的 —— 这个仓库专门记过"同一个东西在两地
+   长得不一样"的教训），但**来源必须一眼看得出**。
+
+   为什么这件事在合规上要紧：规则结论每一条都能展开讲清依据，AI 那段话的
+   依据是模型生成的。两者长得一模一样的话，家属（甚至答辩时的评委）会把
+   "模型说的"当成"系统算的"。
+
+   选点状而不是换颜色：颜色在这个界面里**已经是有含义的**（红黄绿=风险等级），
+   再拿颜色区分来源会让两套语义打架。线的**形状**是空着的，用它最干净。
+
+   外壳上还有一层区分（面板的虚线框 + 「AI 生成」标签），这里是第二条线 ——
+   ⚠️ 但**面板折叠或换页时看不到外壳**，所以卡片自己也得带标记。 */
+.finding--ai {
+  border-left-style: dotted;
+  border-left-width: 3px;
 }
 
 .finding__label {

@@ -166,6 +166,76 @@ function reportCall(r: CallResult): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// 复读检测
+// ---------------------------------------------------------------------------
+//
+// ============================================================================
+// 【为什么需要它】
+// ============================================================================
+// 2026-09-24 把两块的输出摆在一起，发现**规则层三条、AI 三条，一一对应**，
+// 只是换了措辞、调了顺序 —— 这一页的 AI 没提供任何规则层没说的东西。
+//
+// 那次是**肉眼**看出来的。下次改提示词，肉眼就未必看得出（而且我看不出
+// 不等于用户看不出）。
+//
+// ⚠️ **这只能抓"字面重合"，抓不了"换了个说法但意思一样"。**
+//    它是报警器，不是判据 —— 分数低不代表综合得好，只代表没照抄。
+//    真正好不好，仍然只能人看。这一点不因为有了它就改口。
+// ============================================================================
+
+/** 去掉标点后取字符二元组 */
+function bigrams(s: string): Set<string> {
+  const t = s.replace(/[\s，。、；：！？（）()「」【】·｜%°]/g, '')
+  const out = new Set<string>()
+  for (let i = 0; i + 2 <= t.length; i++) out.add(t.slice(i, i + 2))
+  return out
+}
+
+/**
+ * 两句话的字面重合度，0~1。
+ *
+ * 除以**较短那句**的长度：AI 把一句短结论扩写成两倍的句子，仍然是复述，
+ * 不该因为"分母大"就把分数摊薄。
+ */
+function overlap(a: string, b: string): number {
+  const A = bigrams(a)
+  const B = bigrams(b)
+  if (!A.size || !B.size) return 0
+  let hit = 0
+  for (const g of A) if (B.has(g)) hit++
+  return hit / Math.min(A.size, B.size)
+}
+
+/** 打印每条 AI 结论与规则层结论的最高重合度 */
+function reportOverlap(points: { text: string }[]): void {
+  const rules = ctx.findings.map((f) => f.label)
+  if (!rules.length) {
+    console.log('（这一页没有规则层结论可比 —— 概览页的 cards 不参与比对）')
+    return
+  }
+
+  console.log(`与规则层结论的重合度（**越低越好**，>0.5 基本就是复述）：`)
+  let worst = 0
+  for (const p of points) {
+    let best = 0
+    let which = ''
+    for (const r of rules) {
+      const o = overlap(p.text, r)
+      if (o > best) {
+        best = o
+        which = r
+      }
+    }
+    worst = Math.max(worst, best)
+    const flag = best > 0.5 ? `  ⚠ 与「${which.slice(0, 18)}」高度重合` : ''
+    console.log(`  ${best.toFixed(2)}  ${p.text.slice(0, 34)}${flag}`)
+  }
+  if (worst > 0.5) {
+    console.log(`  ⚠️ 最高 ${worst.toFixed(2)} —— 这一轮有复述。看 prompt 里「你的价值在哪」那节`)
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 分析
 // ---------------------------------------------------------------------------
 
@@ -195,6 +265,8 @@ async function runAnalyze(): Promise<boolean> {
     console.log(`     动作：${p.action}`)
   }
   if (parsed.analysis.caveat) console.log(`\n局限：${parsed.analysis.caveat}`)
+  console.log()
+  reportOverlap(parsed.analysis.points)
   console.log()
 
   if (parsed.dropped === 0) console.log('✓ 零误杀。')
