@@ -33,6 +33,7 @@ import { buildDemoSessions, buildDemoAlerts } from '../src/lib/demoData.ts'
 import {
   MAX_QUESTION_CHARS as CLIENT_MAX_QUESTION_CHARS,
   MAX_HISTORY_TURNS as CLIENT_MAX_HISTORY_TURNS,
+  MAX_CITES,
 } from '../src/lib/aiReply.ts'
 
 const results: [string, boolean, string][] = []

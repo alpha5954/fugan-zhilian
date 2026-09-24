@@ -23,6 +23,7 @@ import {
   allowedNumbers,
   unmatchedNumber,
   MAX_QUESTION_CHARS,
+  MAX_CITES,
   type AiParseResult,
 } from '../src/lib/aiReply.ts'
 import {
@@ -477,22 +478,61 @@ console.log('='.repeat(70))
     r3.analysis?.points[0]?.basis.slice(0, 50) ?? '',
   )
 
-  // 超过上限的引用要被截断，不是整条丢
-  const many = JSON.stringify({
+  // ---- ★ 引用条数的上限：**拒绝，不是截断** ----
+  //
+  // 这里原来断言的是"截到上限"。改成拒绝是**实测之后**的修正：
+  // 用户问「我的数据情况乐观吗」，模型报了 4 条正好撞上限，被静默截掉的
+  // 第 5 条里装着它正文用到的 23% —— 于是数值闸门判"23 不在引用范围内"，
+  // **一条正确的回答被丢掉**，而理由看起来毫不相干。
+  //
+  // 静默截断是最糟的一种设计：模型以为报全了，我们偷偷丢掉几条，
+  // 然后以一个查不到原因的方式把结论判死。
+  const atCap = MAX_CITES
+  const overCap = MAX_CITES + 1
+
+  const exactly = JSON.stringify({
     summary: '总体稳定。',
     points: [
-      point(ctx, {
-        text: '整体平稳。',
-        cites: ctx.facts.slice(0, 10).map((f) => f.id),
-      }),
+      point(ctx, { text: '整体平稳。', cites: ctx.facts.slice(0, atCap).map((f) => f.id) }),
     ],
     caveat: '',
   })
-  const r4 = parseAiReply(many, ctx)
   check(
-    '引用超过上限 → 截到上限而不是丢掉整条',
-    r4.analysis !== null && (r4.analysis.points[0]?.cites.length ?? 0) <= 4,
-    `cites=${r4.analysis?.points[0]?.cites.length}`,
+    `正好引用 ${atCap} 条（上限）→ 通过`,
+    parseAiReply(exactly, ctx).analysis !== null,
+    `facts 共 ${ctx.facts.length} 条`,
+  )
+
+  const tooMany = JSON.stringify({
+    summary: '总体稳定。',
+    points: [
+      point(ctx, { text: '整体平稳。', cites: ctx.facts.slice(0, overCap).map((f) => f.id) }),
+    ],
+    caveat: '',
+  })
+  const rOver = parseAiReply(tooMany, ctx)
+  // ⚠️ 是**按条拒**，不是整篇拒：那一条被丢，摘要照常保留。
+  //    第一版断言写的是 analysis === null（期望整篇拒），于是判红了 ——
+  //    断言错了而不是代码错了。
+  check(
+    `★ 引用 ${overCap} 条（超上限）→ 那一条被丢，且理由写明是超上限`,
+    rOver.dropped === 1 &&
+      rOver.analysis !== null &&
+      (rOver.droppedReasons[0] ?? '').includes('超过上限'),
+    rOver.droppedReasons[0] ?? '(竟然通过了)',
+  )
+  check('超上限只丢那一条，摘要照常保留', rOver.analysis?.summary === '总体稳定。')
+
+  // 追问那条路径用的是同一个读取函数，也钉一下
+  const askOver = JSON.stringify({
+    answer: '整体平稳。',
+    cites: ctx.facts.slice(0, overCap).map((f) => f.id),
+    decline: '',
+    caveat: '',
+  })
+  check(
+    '★ 追问路径同样：超上限整条拒绝',
+    parseAiAsk(askOver, ctx, '怎么样').answer === null,
   )
 }
 

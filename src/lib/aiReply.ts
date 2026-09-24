@@ -175,15 +175,27 @@ const MAX_POINTS = 4
 /**
  * 一条结论最多能引用几条事实。
  *
- * 上限管两件事：界面上的「依据」那一行不能长到读不下去
- * （4 条 × 约 45 字 ≈ 180 字），以及提示词里那句"不超过 4 条"有个可执行的兜底。
+ * ============================================================================
+ * 【这个数被改过两次，两次都是因为它太紧】
+ * ============================================================================
+ * 3 → 4：demo 里那条「安全事件导致评分下调」同时用到评分、事件、下调幅度
+ *        三处信息，模型报 3 条刚好漏掉装 78 分的那条 → 整条被拒。
+ * 4 → 6：用户问「我的数据情况乐观吗」，模型报了 4 条正好撞上限，
+ *        被截断掉的第 5 条里装着它正文用到的 23% → 整条被拒。
  *
- * ⚠️ 从 3 提到 4 是**实测之后**改的。原来定 3，而 demo 数据里那条
- *    「安全事件导致评分下调」同时用到了评分、事件、下调幅度三处信息，
- *    模型报了 3 条却漏了装 78 分的那条 → 被闸门拒。
- *    上限太紧的代价不是"少写点"，是**整条结论作废**。
+ * ⚠️ 上限太紧的代价**不是"少写点"，是整条结论作废**，而且失败理由看起来
+ *    毫不相干（"数值 23 不在范围内"），查的时候根本想不到是截断造成的。
+ *
+ * ----------------------------------------------------------------------------
+ * 但也**不能无限放宽**：这个上限是"引用范围"这道检查的全部意义所在。
+ * 如果模型能把 40 条事实全报上，范围就等于整个上下文，归属检查就退化成
+ * 一致性检查了 —— 那正是事实编号制要消灭的东西。
+ *
+ * 6 是个折中：够覆盖真实的综合（实测最多用到 5 条），又让大部分事实
+ * 留在范围之外。
+ * ----------------------------------------------------------------------------
  */
-const MAX_CITES = 4
+export const MAX_CITES = 6
 
 const BANDS: readonly RiskBand[] = ['green', 'yellow', 'red']
 
@@ -373,6 +385,36 @@ export function unmatchedNumber(text: string, allowed: Set<number>): number | nu
 // 单条校验
 // ---------------------------------------------------------------------------
 
+/**
+ * 读取模型报的引用编号。
+ *
+ * ⚠️ **超上限时返回 error（整条拒绝），绝不截断。**
+ *
+ *    这里原来是 `.slice(0, MAX_CITES)` —— 静默截断。实测的后果：
+ *    模型报的引用正好撞上限，被截掉的那条里装着它正文用到的数值，
+ *    于是数值闸门判"这个数不在引用范围内"，**一条正确的结论被丢掉**，
+ *    而失败理由看起来毫不相干（"引用了上下文里没有的数值 23"）——
+ *    查的时候根本想不到是截断造成的。
+ *
+ *    拒绝至少把理由写在脸上，而且提示词里写明了上限，模型有机会做对。
+ */
+function readCites(v: unknown): { cites: string[]; error: string | null } {
+  if (!Array.isArray(v)) return { cites: [], error: null }
+
+  const cites = v.filter((c): c is string => typeof c === 'string')
+
+  if (cites.length > MAX_CITES) {
+    return {
+      cites,
+      error:
+        `报了 ${cites.length} 条引用，超过上限 ${MAX_CITES}` +
+        `（截掉几条会让正文的数字对不上，所以整条丢弃）`,
+    }
+  }
+
+  return { cites, error: null }
+}
+
 /** 一条内容被拒的中文原因。null 表示通过 */
 type Reject = string | null
 
@@ -474,12 +516,13 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
       continue
     }
 
-    // ★ 引用。模型只能报编号，依据那一行它碰不到
-    const cites = Array.isArray(p.cites)
-      ? p.cites
-          .filter((c): c is string => typeof c === 'string')
-          .slice(0, MAX_CITES)
-      : []
+    // ★ 引用。模型只能报编号，依据那一行它碰不到。
+    //   超上限是**整条拒绝**，不是截断 —— 理由见 readCites
+    const { cites, error: citesError } = readCites(p.cites)
+    if (citesError) {
+      droppedReasons.push(`「${tag}」${citesError}`)
+      continue
+    }
 
     if (!cites.length) {
       // 一条结论必须能指到具体的事实上。指不到就不该出现 ——
@@ -634,11 +677,8 @@ export function parseAiAsk(
   }
 
   // ---- 出口②：回答 ----
-  const cites = Array.isArray(o.cites)
-    ? o.cites
-        .filter((c): c is string => typeof c === 'string')
-        .slice(0, MAX_CITES)
-    : []
+  const { cites, error: citesError } = readCites(o.cites)
+  if (citesError) return fail(citesError)
   if (!cites.length) return fail('回答没有报 cites —— 说不出依据的答案不该显示')
 
   const factById = new Map(ctx.facts.map((f) => [f.id, f]))
