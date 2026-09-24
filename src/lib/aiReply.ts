@@ -28,15 +28,32 @@
 // ============================================================================
 // ⚠️ 数值闸门挡得住什么、挡不住什么
 // ============================================================================
-// 【结论条目：归属检查】（2026-09-24 起）
-// 每条结论必须报出它引用的是哪几条事实（`cites`），数值只在**那几条**里查。
-// 所以这两类都挡得住：
-//   ✓ 凭空编出来的测量值（角度、温度、百分比、次数）
-//   ✓ **张冠李戴** —— 引用一条讲角度的事实、正文里却写皮温，当场被拒
+// 【唯一的硬线：编造】（2026-09-24 改过一版，见下）
+// 正文里的每个数字，都必须能在**某一条事实**里找到。找不到就是编造，
+// 整条拒绝。这是这个模块最后也最要紧的一道防线。
 //
-// 【摘要：仍是全局一致性检查】
-// 摘要是跨事实的总述，没法绑到某一条引用上，所以它比对的是整个上下文。
-// 于是**摘要里的张冠李戴仍然可能**（这是本模块剩下最主要的缺口）。
+// 【"漏引"和"张冠李戴"都不再拦了 —— 改成补出真正出处】
+// 上一版是"数字必须在**你报的那几条**里"，后来改掉了。原因是那个检查
+// 分不清两件性质完全不同的事：
+//
+//   ① 数字是真的，只是模型漏报了它出自哪条   ← **记账失误**
+//   ② 数字是编的                            ← **撒谎**
+//
+// 两者在旧实现里长得一模一样（都是"不在引用范围内"），判罚也一样重。
+// 结果是最常见的失败模式把功能搞得经常不可用 —— 实测连着误杀五次：
+// 「达标率 61.5%」「漏了 78 那条」「23 被截断」「7 漏引」……
+//
+// 现在：数字只要**在任何一条事实里**就通过，并把那条事实**补进依据**。
+// 于是：
+//   ✓ 漏引 → 自动补上，用户看到的依据是完整的
+//   ✓ 张冠李戴 → **在依据里露出来**（正文说皮温、依据写着角度），
+//                比"整条消失"更有用：人一眼能看出对不上
+//
+// 代价说清楚：**"归属"这道检查没有了**，只剩"这个数在我们数据里存在吗"。
+// 换来的是一个能用的功能 —— 一个经常不可用的功能，再强的检查也没意义。
+//
+// 【摘要：只比对整个上下文】
+// 摘要是跨事实的总述，绑不到某一条引用上，所以它只能比对整个上下文。
 //
 // 【两类都挡不住的】
 //   ✗ 整句不带数字的定性断言
@@ -171,31 +188,6 @@ const MAX_ACTION_CHARS = 120
 const MAX_CAVEAT_CHARS = 200
 /** 提示词要求最多 3 条，这里留一条余量 */
 const MAX_POINTS = 4
-
-/**
- * 一条结论最多能引用几条事实。
- *
- * ============================================================================
- * 【这个数被改过两次，两次都是因为它太紧】
- * ============================================================================
- * 3 → 4：demo 里那条「安全事件导致评分下调」同时用到评分、事件、下调幅度
- *        三处信息，模型报 3 条刚好漏掉装 78 分的那条 → 整条被拒。
- * 4 → 6：用户问「我的数据情况乐观吗」，模型报了 4 条正好撞上限，
- *        被截断掉的第 5 条里装着它正文用到的 23% → 整条被拒。
- *
- * ⚠️ 上限太紧的代价**不是"少写点"，是整条结论作废**，而且失败理由看起来
- *    毫不相干（"数值 23 不在范围内"），查的时候根本想不到是截断造成的。
- *
- * ----------------------------------------------------------------------------
- * 但也**不能无限放宽**：这个上限是"引用范围"这道检查的全部意义所在。
- * 如果模型能把 40 条事实全报上，范围就等于整个上下文，归属检查就退化成
- * 一致性检查了 —— 那正是事实编号制要消灭的东西。
- *
- * 6 是个折中：够覆盖真实的综合（实测最多用到 5 条），又让大部分事实
- * 留在范围之外。
- * ----------------------------------------------------------------------------
- */
-export const MAX_CITES = 6
 
 const BANDS: readonly RiskBand[] = ['green', 'yellow', 'red']
 
@@ -370,6 +362,93 @@ function numbersMatch(a: Num, allowed: Set<number>): boolean {
 }
 
 /**
+ * 找出这段文字里的数字**实际出自**哪几条事实 —— 并顺手抓出编造的。
+ *
+ * ============================================================================
+ * 【为什么需要它：一个分不清"漏引"和"编造"的检查】
+ * ============================================================================
+ * 原来数值只在**模型自己报的那几条**（cites）里查。于是这两种情况长得
+ * 一模一样，都是"这个数不在引用范围内"：
+ *
+ *   ① 数字是真的，只是模型漏报了它出自哪条   ← **记账失误**
+ *   ② 数字是编的                            ← **撒谎**
+ *
+ * 而我们对两者判罚一样重：整条结论作废。**这就是那五次误杀的根子。**
+ * 实测出现过：模型报了 4 条、正文用到的第 5 个数（7 天）装在没被报的
+ * 那条事实里 → 「引用了上下文里没有的数值 7」→ 一条正确的回答被丢掉。
+ *
+ * 其实分得清 —— 我们手上有全部事实。所以改成一个三岔判断：
+ *
+ *   数字在被引用的事实里  → 通过
+ *   数字在**别的**事实里   → 通过，并把那条事实**补进依据**（这才是漏引）
+ *   任何事实里都没有      → 拒绝（这才是编造）
+ *
+ * ============================================================================
+ * 【这个改动换来了什么、失去了什么】
+ * ============================================================================
+ * 换来了：**"漏引"不再等于"判死"**。最常见的失败模式消失了。
+ *
+ * 失去了：**"张冠李戴"不再被拦**。原来"引用一条讲角度的事实、正文却写皮温"
+ *        会被拒；现在那个皮温数字会被归到装它的事实上、照样通过。
+ *
+ * ⚠️ 但**不是变成静默**：补引之后，依据那一行会显示**数字真正出自的那条
+ *    事实**。所以张冠李戴会**在依据里露出来**（正文说皮温、依据写着角度），
+ *    而不是被悄悄放过 —— 从"拦下来"变成"摆出来让人看"。
+ *
+ *    这个取舍是划算的：一个经常不可用的功能，再强的检查也没有意义。
+ * ============================================================================
+ *
+ * @param already 已知被引用的事实编号，这些不再重复加进 extras
+ * @returns `bad` 非 null 表示有数字在任何事实里都找不到 —— 那是编造
+ */
+export function attributeNumbers(
+  text: string,
+  ctx: AiContext,
+  already: ReadonlySet<string>,
+): { extras: AiFact[]; bad: number | null } {
+  const nums = extract(text)
+  if (!nums.length) return { extras: [], bad: null }
+
+  // 每条事实的数值集合，惰性算一次 —— 事实最多 40 条，不必预先全建
+  const cache = new Map<string, Set<number>>()
+  const numsOfFact = (f: AiFact): Set<number> => {
+    let s = cache.get(f.id)
+    if (!s) {
+      s = new Set<number>()
+      collect(f.text, s)
+      cache.set(f.id, s)
+    }
+    return s
+  }
+
+  const extras: AiFact[] = []
+  const seen = new Set(already)
+
+  for (const n of nums) {
+    let found = false
+
+    for (const f of ctx.facts) {
+      if (!numbersMatch(n, numsOfFact(f))) continue
+      found = true
+      // 没被引用过的事实补进来 —— 它就是漏引的那一条
+      if (!seen.has(f.id)) {
+        seen.add(f.id)
+        extras.push(f)
+      }
+      // 一个数可能同时出现在好几条事实里。归到第一条就够 ——
+      // 全部收进来会让依据越滚越长，而归属只需要一个成立的说法
+      break
+    }
+
+    // ⚠️ 一条事实里都没有 = 编造。这一档**必须**留着，
+    //    它是数值闸门最后也是最要紧的那道防线
+    if (!found) return { extras, bad: n.value }
+  }
+
+  return { extras, bad: null }
+}
+
+/**
  * 检查一段文本里的数字是不是全部来自上下文。
  *
  * @returns 有问题时返回第一个对不上的数字，全部对得上返回 null
@@ -388,53 +467,57 @@ export function unmatchedNumber(text: string, allowed: Set<number>): number | nu
 /**
  * 读取模型报的引用编号。
  *
- * ⚠️ **超上限时返回 error（整条拒绝），绝不截断。**
+ * ============================================================================
+ * 【这里不再有条数上限 —— 上限被删过两次，每次都是它在制造失败】
+ * ============================================================================
+ * 3 → 4 → 6，每次放宽都是因为撞上限丢了一条正确的结论。而删掉它，是因为
+ * 数值校验改成**全局**之后（见 attributeNumbers），`cites` 的角色变了：
  *
- *    这里原来是 `.slice(0, MAX_CITES)` —— 静默截断。实测的后果：
- *    模型报的引用正好撞上限，被截掉的那条里装着它正文用到的数值，
- *    于是数值闸门判"这个数不在引用范围内"，**一条正确的结论被丢掉**，
- *    而失败理由看起来毫不相干（"引用了上下文里没有的数值 23"）——
- *    查的时候根本想不到是截断造成的。
+ *   改之前：cites 决定**数值在哪个范围内查** → 上限直接决定检查的松紧，
+ *           所以它既是保护也是枷锁
+ *   改之后：cites 只决定**依据先显示哪几条** → 上限只管"依据那一行多长"
  *
- *    拒绝至少把理由写在脸上，而且提示词里写明了上限，模型有机会做对。
+ * 而现在依据是**渲染成逐条列表**的，长一点也读得下去。所以这个上限只剩
+ * 一个作用：**在没有收益的情况下制造失败**。
+ *
+ * ⚠️ 也不能退回"截断"：截断会让模型报的和依据里显示的**对不上**，
+ *    而依据的全部意义就是可核对。
+ *
+ * 真正的边界由 `attributeNumbers` 把着 —— 数字必须在某条事实里存在。
+ * ============================================================================
  */
-function readCites(v: unknown): { cites: string[]; error: string | null } {
-  if (!Array.isArray(v)) return { cites: [], error: null }
-
-  const cites = v.filter((c): c is string => typeof c === 'string')
-
-  if (cites.length > MAX_CITES) {
-    return {
-      cites,
-      error:
-        `报了 ${cites.length} 条引用，超过上限 ${MAX_CITES}` +
-        `（截掉几条会让正文的数字对不上，所以整条丢弃）`,
-    }
-  }
-
-  return { cites, error: null }
+function readCiteIds(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v.filter((c): c is string => typeof c === 'string')
 }
 
 /** 一条内容被拒的中文原因。null 表示通过 */
 type Reject = string | null
 
-function checkText(
+/** 形状 + 合规。**不含数值检查** —— 那一步现在由 attributeNumbers 负责 */
+function checkText(text: string, maxChars: number): Reject {
+  if (typeof text !== 'string' || !text.trim()) return '内容为空'
+  if (text.length > maxChars) return `超过 ${maxChars} 字`
+  return complianceIssue(text)
+}
+
+/**
+ * 形状 + 合规 + 数值（**对整份上下文**，不限定引用范围）。
+ *
+ * 现在只有**摘要**用它 —— 摘要是一段跨事实的总述，绑不到某一条引用上，
+ * 所以它只能比对整个上下文（这也是本模块剩下最主要的缺口）。
+ * 结论条目和追问都改走 `attributeNumbers` 那条路。
+ */
+function checkTextAgainstAll(
   text: string,
   allowed: Set<number>,
   maxChars: number,
-  /** 这一条要不要查数值。caveat 是模型自述局限，不该有数字 */
-  checkNumbers: boolean,
 ): Reject {
-  if (typeof text !== 'string' || !text.trim()) return '内容为空'
-  if (text.length > maxChars) return `超过 ${maxChars} 字`
+  const why = checkText(text, maxChars)
+  if (why) return why
 
-  const compliance = complianceIssue(text)
-  if (compliance) return compliance
-
-  if (checkNumbers) {
-    const bad = unmatchedNumber(text, allowed)
-    if (bad !== null) return `引用了上下文里没有的数值 ${bad}`
-  }
+  const bad = unmatchedNumber(text, allowed)
+  if (bad !== null) return `引用了上下文里没有的数值 ${bad}`
 
   return null
 }
@@ -490,7 +573,7 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
   {
     const rawSummary = asString(o.summary)
     // summary 里可以有数字（它通常就是引用了几个关键值），一样要过闸门
-    const why = checkText(rawSummary, allowed, MAX_SUMMARY_CHARS, true)
+    const why = checkTextAgainstAll(rawSummary, allowed, MAX_SUMMARY_CHARS)
     if (why) droppedReasons.push(`摘要：${why}`)
     else summary = rawSummary.trim()
   }
@@ -517,12 +600,8 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
     }
 
     // ★ 引用。模型只能报编号，依据那一行它碰不到。
-    //   超上限是**整条拒绝**，不是截断 —— 理由见 readCites
-    const { cites, error: citesError } = readCites(p.cites)
-    if (citesError) {
-      droppedReasons.push(`「${tag}」${citesError}`)
-      continue
-    }
+    //   没有条数上限 —— 理由见 readCiteIds
+    const cites = readCiteIds(p.cites)
 
     if (!cites.length) {
       // 一条结论必须能指到具体的事实上。指不到就不该出现 ——
@@ -542,32 +621,48 @@ export function parseAiReply(raw: unknown, ctx: AiContext): AiParseResult {
       continue
     }
 
-    // ★ 依据由**我们**渲染。模型的原始文本进不了这一行。
+    const t = asString(p.text)
+    const action = asString(p.action)
+
+    // 先过形状与合规（这两步和数值无关）
+    const why =
+      checkText(t, MAX_POINT_TEXT_CHARS) ?? checkText(action, MAX_ACTION_CHARS)
+    if (why) {
+      droppedReasons.push(`「${tag}」${why}`)
+      continue
+    }
+
+    // ★ 数值：查它实际出自哪几条事实，顺手抓编造。
+    //
+    // 模型报的 cites 是**起点**不是终点 —— 它漏报的那些由我们补上。
+    // 实测最常见的失败就是漏报（"引用里没有 7"），而那数字往往就装在
+    // 隔壁那条事实里。理由见 attributeNumbers 的注释。
+    const citedIds = new Set(cited.map((f) => f.id))
+
+    const byText = attributeNumbers(t, ctx, citedIds)
+    if (byText.bad !== null) {
+      droppedReasons.push(`「${tag}」编造了数值 ${byText.bad}`)
+      continue
+    }
+
+    const afterText = new Set([...citedIds, ...byText.extras.map((f) => f.id)])
+    const byAction = attributeNumbers(action, ctx, afterText)
+    if (byAction.bad !== null) {
+      droppedReasons.push(`「${tag}」action 里编造了数值 ${byAction.bad}`)
+      continue
+    }
+
+    // ★ 依据由**我们**渲染：模型引用的在前，我们补的在后。
     //
     // ⚠️ 分隔符不能用「；」—— 事实文本自己就含分号（规则层的 evidence 里
     //    那种「直腿抬高 9.3° → 11.4°；坐位伸膝 60.4° → 72.9°」），
     //    拼起来分不清哪里是一条事实的结尾。用 BASIS_SEPARATOR 当中缝。
-    const basis = cited.map((f) => f.text).join(BASIS_SEPARATOR)
-
-    // ★ 数值闸门收紧到「你引用的那几条事实里」。理由见 allowedNumbersForFacts
-    const scoped = allowedNumbersForFacts(ctx, cited.map((f) => f.id))
-
-    const t = asString(p.text)
-    const action = asString(p.action)
-
-    const why =
-      checkText(t, scoped, MAX_POINT_TEXT_CHARS, true) ??
-      checkText(action, scoped, MAX_ACTION_CHARS, true)
-
-    if (why) {
-      droppedReasons.push(`「${tag}」${why}（引用了 ${cites.join(',')}）`)
-      continue
-    }
+    const all = [...cited, ...byText.extras, ...byAction.extras]
 
     points.push({
       text: t.trim(),
-      basis,
-      cites: cited.map((f) => f.id),
+      basis: all.map((f) => f.text).join(BASIS_SEPARATOR),
+      cites: all.map((f) => f.id),
       action: action.trim(),
       band: band as RiskBand,
     })
@@ -677,8 +772,7 @@ export function parseAiAsk(
   }
 
   // ---- 出口②：回答 ----
-  const { cites, error: citesError } = readCites(o.cites)
-  if (citesError) return fail(citesError)
+  const cites = readCiteIds(o.cites)
   if (!cites.length) return fail('回答没有报 cites —— 说不出依据的答案不该显示')
 
   const factById = new Map(ctx.facts.map((f) => [f.id, f]))
@@ -691,14 +785,22 @@ export function parseAiAsk(
     return fail(`引用了不存在的事实：${cites.join(',')}`)
   }
 
-  // 数值闸门同样收紧到「你引用的那几条」。追问这条路径和结论那条一样严。
-  //
-  // ⚠️ 失败原因里要**带上它引用的是哪几条** —— 不带的话只知道"某个数字
-  //    不对"，不知道是"数字编的"还是"引用漏了一条"。这两种的修法完全相反：
-  //    前者要改提示词，后者要补引用。结论那条路径也是这么做的。
-  const scoped = allowedNumbersForFacts(ctx, cited.map((f) => f.id))
-  const why = checkText(rawAnswer, scoped, MAX_ANSWER_CHARS, true)
-  if (why) return fail(`回答${why}（引用了 ${cites.join(',')}）`)
+  // 形状与合规
+  const why = checkText(rawAnswer, MAX_ANSWER_CHARS)
+  if (why) return fail(`回答${why}`)
+
+  // ★ 数值：和结论那条路径同一套 —— 漏报的引用由我们补上，
+  //    只有"任何事实里都没有"才算编造。理由见 attributeNumbers
+  const attribution = attributeNumbers(
+    rawAnswer,
+    ctx,
+    new Set(cited.map((f) => f.id)),
+  )
+  if (attribution.bad !== null) {
+    return fail(`回答编造了数值 ${attribution.bad}（引用了 ${cites.join(',')}）`)
+  }
+
+  const all = [...cited, ...attribution.extras]
 
   let caveat = ''
   {
@@ -711,8 +813,9 @@ export function parseAiAsk(
       question: q,
       answer: rawAnswer,
       decline: '',
-      cites: cited.map((f) => f.id),
-      basis: cited.map((f) => f.text).join(BASIS_SEPARATOR),
+      // 依据 = 模型引用的 + 我们补的（漏报的那些）
+      cites: all.map((f) => f.id),
+      basis: all.map((f) => f.text).join(BASIS_SEPARATOR),
       caveat,
     },
     reason: null,

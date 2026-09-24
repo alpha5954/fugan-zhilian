@@ -23,7 +23,6 @@ import {
   allowedNumbers,
   unmatchedNumber,
   MAX_QUESTION_CHARS,
-  MAX_CITES,
   type AiParseResult,
 } from '../src/lib/aiReply.ts'
 import {
@@ -428,16 +427,41 @@ console.log('='.repeat(70))
     console.log(`  用 ${host.id}（${host.text.slice(0, 30)}…）`)
     console.log(`  偷 ${other.id} 里的数字 ${stolen}`)
 
+    // ★ 张冠李戴：**现在不拦了**，改成"补出真正出处"。
+    //
+    // 这条断言原来是「引用 A 却写 B 的数字 → 被拒」。2026-09-24 改掉了，
+    // 因为那个检查的代价太大：它和"漏引"长得一模一样，而漏引是**记账
+    // 失误**、编造才是**撒谎** —— 判罚一样重，结果最常见的失败把功能
+    // 搞得经常不可用（实测连着误杀五次）。
+    //
+    // 现在：数字只要**在任何一条事实里**就通过，并把那条事实补进依据。
+    // 于是张冠李戴**不是被悄悄放过，而是在依据里露出来** ——
+    // 正文说皮温、依据写着角度，人一眼能看出对不上。
     const swapped = JSON.stringify({
       summary: '总体稳定。',
       points: [point(ctx, { text: `该项的数值是 ${stolen}。`, cites: [host.id] })],
       caveat: '',
     })
     const r = parseAiReply(swapped, ctx)
+    const sp = r.analysis?.points[0]
     check(
-      '★ 引用 A 却写 B 的数字（张冠李戴）→ 被拒',
-      r.dropped === 1,
-      `写了 ${stolen}，但它不在 ${host.id} 里`,
+      '★ 张冠李戴不再拦，但依据里补出了数字真正的出处',
+      r.analysis !== null &&
+        (sp?.cites.length ?? 0) > 1 &&
+        (sp?.basis ?? '').includes(String(stolen)),
+      `写了 ${stolen}，模型只报了 ${host.id}，依据里补成 ${sp?.cites.join(',')}`,
+    )
+    check(
+      '★ 但**编造**仍然拦得住（它是唯一该拦的那档）',
+      parseAiReply(
+        JSON.stringify({
+          summary: '总体稳定。',
+          points: [point(ctx, { text: '该项的数值是 99999。' })],
+          caveat: '',
+        }),
+        ctx,
+      ).dropped === 1,
+      '99999 在任何事实里都没有',
     )
 
     // 反方向：写被引用事实**自己**的数字，必须通过（否则闸门太紧）
@@ -478,61 +502,38 @@ console.log('='.repeat(70))
     r3.analysis?.points[0]?.basis.slice(0, 50) ?? '',
   )
 
-  // ---- ★ 引用条数的上限：**拒绝，不是截断** ----
+  // ---- ★ 引用**没有条数上限**（2026-09-24 删掉）----
   //
-  // 这里原来断言的是"截到上限"。改成拒绝是**实测之后**的修正：
-  // 用户问「我的数据情况乐观吗」，模型报了 4 条正好撞上限，被静默截掉的
-  // 第 5 条里装着它正文用到的 23% —— 于是数值闸门判"23 不在引用范围内"，
-  // **一条正确的回答被丢掉**，而理由看起来毫不相干。
-  //
-  // 静默截断是最糟的一种设计：模型以为报全了，我们偷偷丢掉几条，
-  // 然后以一个查不到原因的方式把结论判死。
-  const atCap = MAX_CITES
-  const overCap = MAX_CITES + 1
+  // 这个上限存在过、被放宽过两次（3→4→6），每次都是撞上限烧掉一条正确的
+  // 结论。最后删掉，是因为数值校验改成**全局**之后（见 attributeNumbers），
+  // cites 的角色变了 —— 它只决定"依据先显示哪几条"，不再决定
+  // "数字在哪个范围内查"。于是上限只剩一个作用：**在没有收益的情况下
+  // 制造失败**。实测它就又误杀了一次：模型报了 7 条，整条被拒。
+  const allIds = ctx.facts.map((f) => f.id)
 
-  const exactly = JSON.stringify({
+  const many = JSON.stringify({
     summary: '总体稳定。',
-    points: [
-      point(ctx, { text: '整体平稳。', cites: ctx.facts.slice(0, atCap).map((f) => f.id) }),
-    ],
+    points: [point(ctx, { text: '整体平稳。', cites: allIds })],
     caveat: '',
   })
+  const rMany = parseAiReply(many, ctx)
   check(
-    `正好引用 ${atCap} 条（上限）→ 通过`,
-    parseAiReply(exactly, ctx).analysis !== null,
-    `facts 共 ${ctx.facts.length} 条`,
+    `引用全部 ${allIds.length} 条事实也不拒（没有上限）`,
+    rMany.analysis !== null,
+    rMany.droppedReasons[0] ?? '',
   )
-
-  const tooMany = JSON.stringify({
-    summary: '总体稳定。',
-    points: [
-      point(ctx, { text: '整体平稳。', cites: ctx.facts.slice(0, overCap).map((f) => f.id) }),
-    ],
-    caveat: '',
-  })
-  const rOver = parseAiReply(tooMany, ctx)
-  // ⚠️ 是**按条拒**，不是整篇拒：那一条被丢，摘要照常保留。
-  //    第一版断言写的是 analysis === null（期望整篇拒），于是判红了 ——
-  //    断言错了而不是代码错了。
   check(
-    `★ 引用 ${overCap} 条（超上限）→ 那一条被丢，且理由写明是超上限`,
-    rOver.dropped === 1 &&
-      rOver.analysis !== null &&
-      (rOver.droppedReasons[0] ?? '').includes('超过上限'),
-    rOver.droppedReasons[0] ?? '(竟然通过了)',
+    '依据把那几条都列了出来（没有被截断）',
+    (rMany.analysis?.points[0]?.cites.length ?? 0) === allIds.length,
+    `${rMany.analysis?.points[0]?.cites.length} / ${allIds.length}`,
   )
-  check('超上限只丢那一条，摘要照常保留', rOver.analysis?.summary === '总体稳定。')
-
-  // 追问那条路径用的是同一个读取函数，也钉一下
-  const askOver = JSON.stringify({
-    answer: '整体平稳。',
-    cites: ctx.facts.slice(0, overCap).map((f) => f.id),
-    decline: '',
-    caveat: '',
-  })
   check(
-    '★ 追问路径同样：超上限整条拒绝',
-    parseAiAsk(askOver, ctx, '怎么样').answer === null,
+    '追问路径同样没有上限',
+    parseAiAsk(
+      JSON.stringify({ answer: '整体平稳。', cites: allIds, decline: '', caveat: '' }),
+      ctx,
+      '怎么样',
+    ).answer !== null,
   )
 }
 

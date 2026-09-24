@@ -33,7 +33,6 @@ import { buildDemoSessions, buildDemoAlerts } from '../src/lib/demoData.ts'
 import {
   MAX_QUESTION_CHARS as CLIENT_MAX_QUESTION_CHARS,
   MAX_HISTORY_TURNS as CLIENT_MAX_HISTORY_TURNS,
-  MAX_CITES,
 } from '../src/lib/aiReply.ts'
 
 const results: [string, boolean, string][] = []
@@ -256,9 +255,14 @@ console.log('='.repeat(70))
     !/["']basis["']\s*:/.test(SYSTEM_PROMPT),
     '模板里有的话模型会照写，而客户端不读它',
   )
+  // ⚠️ 这条规则 2026-09-24 改过：从"数字必须在**你报的那几条**里"
+  //    改成"数字必须**存在于 facts 里**"。改的原因见 aiReply.ts 里
+  //    attributeNumbers 的注释 —— 旧规则分不清"漏引"和"编造"，
+  //    把记账失误当撒谎罚，实测连着误杀五次。
   check(
-    '提示词要求正文数值来自引用的那几条',
-    SYSTEM_PROMPT.includes('引用范围之外的数字'),
+    '提示词要求正文数值必须存在于 facts 里',
+    SYSTEM_PROMPT.includes('真实存在于 facts 里'),
+    '不是"在引用范围内" —— 那条已经废除了',
   )
 
   // ---- 语气：别当数据复读机（用户反馈之后加的）----
